@@ -1,39 +1,41 @@
-name: "[E3] AWS Infrastructure Deployment"
+name: "[E1/E3] AWS Infrastructure Deployment"
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ "main", "develop" ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ "main" ]
+  workflow_dispatch:
 
 permissions:
-  [cite_start]id-token: write   # REQUERIDO para OIDC [cite: 1169]
-  [cite_start]contents: read    # REQUERIDO para leer el código [cite: 1169]
+  id-token: write   # Obligatorio para OIDC
+  contents: read    # Obligatorio para leer el repo
 
 jobs:
-  verify-aws-conn:
-    name: "Verify AWS Connection"
+  deploy-dev:
+    name: "Deploy to Development"
     runs-on: ubuntu-latest
-    environment: development
+    # Se ejecuta solo si es la rama main o develop
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
+      - name: Configure AWS Credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          # Usaremos variables de GitHub para mayor seguridad [cite: 1170]
-          role-to-assume: ${{ vars.AWS_ROLE_DEV }}
+          role-to-assume: ${{ vars.AWS_ROLE_DEV }} # El ARN que pusiste en Variables
           aws-region: us-east-1
           role-session-name: gha-session-${{ github.run_id }}
 
-      - name: Verify Identity
-        [cite_start]run: aws sts get-caller-identity # Debe mostrar la cuenta 245650696072 [cite: 1171]
+      - name: Verify AWS Identity
+        run: aws sts get-caller-identity # Esto valida la cuenta 245650696072
 
-      - name: Deploy CloudFormation Stack
+      - name: Deploy VPC Stack
         uses: aws-actions/aws-cloudformation-github-deploy@v1
         with:
-          name: !Sub sow-001-vpc-${{ vars.ENVIRONMENT }}
+          name: sow-001-vpc-dev
           template: SOW/infrastructure/cloudformation/dev/01-vpc.yaml
           parameter-overrides: >-
             ProjectName=ia-app,
