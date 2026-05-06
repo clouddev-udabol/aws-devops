@@ -1,0 +1,115 @@
+﻿name: Deploy SOW Budget
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'SOW/infrastructure/cloudformation/**/03-budget.yaml'
+  workflow_dispatch:
+    inputs:
+      budget_amount:
+        description: 'Budget amount in USD'
+        required: false
+        default: '100'
+      alert_email:
+        description: 'Alert email'
+        required: false
+        default: 'cloudmanagement@udabol.edu.bo'
+
+jobs:
+  deploy-budget:
+    runs-on: ubuntu-latest
+    environment: QA
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+      
+      - name: Deploy SOW Budget to QA
+        uses: aws-actions/aws-cloudformation-github-deploy@v1
+        with:
+          name: sow-budget-qa
+          template: SOW/infrastructure/cloudformation/qa/03-budget.yaml
+          parameter-overrides: >-
+            AlertEmail=${{ github.event.inputs.alert_email || 'cloudmanagement@udabol.edu.bo' }},
+            BudgetName=SOW-001-E4-QA-100USD,
+            BudgetAmount=${{ github.event.inputs.budget_amount || '100' }}
+          capabilities: CAPABILITY_IAM
+      
+      - name: Get SNS Topic ARN
+        id: stack-outputs
+        run: |
+          TOPIC_ARN=$(aws cloudformation describe-stacks \
+            --stack-name sow-budget-qa \
+            --query "Stacks[0].Outputs[?OutputKey=='SNSTopicArn'].OutputValue" \
+            --output text)
+          echo "topic_arn=$TOPIC_ARN" >> $GITHUB_OUTPUT
+          echo "✅ SNS Topic ARN: $TOPIC_ARN"
+      
+      - name: Send test notification
+        run: |
+          aws sns publish \
+            --topic-arn ${{ steps.stack-outputs.outputs.topic_arn }} \
+            --subject "✅ SOW Budget Deployed to QA" \
+            --message "Budget SOW-001-E4-QA-100USD has been deployed successfully.
+
+Configuration:
+- Budget Amount: ${{ github.event.inputs.budget_amount || '100' }} USD
+- Monitoring: Daily
+- Thresholds: 50%, 80%, 100%
+- Alert Email: ${{ github.event.inputs.alert_email || 'cloudmanagement@udabol.edu.bo' }}
+
+⚠️ IMPORTANT: Please confirm subscription by clicking the link received in the email.
+
+Deployment Time: $(date -u)
+Stack Name: sow-budget-qa"
+          
+          echo "✅ Test notification sent"
+      
+      - name: Verify budget deployment
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          
+          echo "=== Budget Details ==="
+          aws budgets describe-budgets \
+            --account-id $ACCOUNT_ID \
+            --budget-name SOW-001-E4-QA-100USD \
+            --query "Budgets[0].[BudgetName, BudgetLimit.Amount, TimeUnit]" \
+            --output table
+          
+          echo -e "\n=== Notification Thresholds ==="
+          aws budgets describe-notifications-for-budget \
+            --account-id $ACCOUNT_ID \
+            --budget-name SOW-001-E4-QA-100USD \
+            --query "Notifications[*].[Threshold, NotificationType]" \
+            --output table
+      
+      - name: Create GitHub deployment summary
+        run: |
+          echo "## 🎯 SOW Budget Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Budget Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Budget Name:** SOW-001-E4-QA-100USD" >> $GITHUB_STEP_SUMMARY
+          echo "- **Amount:** ${{ github.event.inputs.budget_amount || '100' }} USD" >> $GITHUB_STEP_SUMMARY
+          echo "- **Type:** DAILY (Daily monitoring)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** QA" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔔 Alert Thresholds" >> $GITHUB_STEP_SUMMARY
+          echo "- **50%** - Alert at ${{ github.event.inputs.budget_amount && format('{0}', github.event.inputs.budget_amount | int * 0.5) || '50' }} USD" >> $GITHUB_STEP_SUMMARY
+          echo "- **80%** - Alert at ${{ github.event.inputs.budget_amount && format('{0}', github.event.inputs.budget_amount | int * 0.8) || '80' }} USD" >> $GITHUB_STEP_SUMMARY
+          echo "- **100%** - Alert at ${{ github.event.inputs.budget_amount || '100' }} USD" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📧 Notifications" >> $GITHUB_STEP_SUMMARY
+          echo "- **Email:** ${{ github.event.inputs.alert_email || 'cloudmanagement@udabol.edu.bo' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **SNS Topic:** ${{ steps.stack-outputs.outputs.topic_arn }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Deployment Status" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** Successfully deployed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Stack Name:** sow-budget-qa" >> $GITHUB_STEP_SUMMARY
