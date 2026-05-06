@@ -13,6 +13,7 @@ jobs:
   deploy-dev:
     name: "Deploy to Development"
     runs-on: ubuntu-latest
+    # Se ejecuta solo si es la rama develop o main (según tu estándar SOW)
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
     
     steps:
@@ -34,13 +35,20 @@ jobs:
         with:
           name: sow-001-vpc-dev
           template: SOW/infrastructure/cloudformation/dev/01-vpc.yaml
+          # Los parámetros deben coincidir con la definición de tu 01-vpc.yaml
           parameter-overrides: >-
             ProjectName=ia-app,
             EnvironmentName=development,
-            VpcCidr=10.10.0.0/16
+            VpcCidr=10.10.0.0/16,
+            TicketId=SOW-001,
+            AvailabilityZone=us-east-1a
           no-fail-on-empty-changeset: "1"
-          # LLAVE DE ORO: Tags obligatorios para cumplir la SCP p-lgafaevf
+          # REQUISITO CRÍTICO: Tags para cumplir con la SCP p-lgafaevf
+          # La SCP exige "Entorno=desarrollo" (en minúsculas)
           tags: |
             Entorno=desarrollo
             Project=ia-app
-            ManagedBy=github-actions
+            ManagedBy=cloudformation
+            Application=platform
+            Owner=cloudmanagement@udabol.edu.bo
+            TicketId=SOW-001
