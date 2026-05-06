@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'VPC Infrastructure with Mandatory Governance Tags for SCP Compliance'
+Description: 'VPC Infrastructure with Mandatory Governance Tags'
 
 Parameters:
   ProjectName:
@@ -7,13 +7,12 @@ Parameters:
     Default: ia-app
   EnvironmentName:
     Type: String
-    Default: desarrollo
+    Default: development
   VpcCidr:
     Type: String
     Default: 10.10.0.0/16
 
 Resources:
-  # El recurso principal suele ser el que dispara el bloqueo
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -23,32 +22,8 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${ProjectName}-${EnvironmentName}-vpc
-        # ESTE TAG ES EL QUE BUSCA LA SCP p-lgafaevf
+        # Este tag satisface la política SCP a nivel de recurso (ec2:CreateVpc)
         - Key: Entorno
           Value: desarrollo
         - Key: Project
           Value: !Ref ProjectName
-
-  InternetGateway:
-    Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: Name
-          Value: !Sub ${ProjectName}-${EnvironmentName}-igw
-        - Key: Entorno
-          Value: desarrollo
-        - Key: Project
-          Value: !Ref ProjectName
-
-  VPCGatewayAttachment:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      VpcId: !Ref VPC
-      InternetGatewayId: !Ref InternetGateway
-
-Outputs:
-  VpcId:
-    Description: VPC ID
-    Value: !Ref VPC
-    Export:
-      Name: !Sub ${ProjectName}-${EnvironmentName}-VpcId

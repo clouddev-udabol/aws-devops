@@ -35,12 +35,8 @@ jobs:
           name: sow-001-vpc-dev
           template: SOW/infrastructure/cloudformation/dev/01-vpc.yaml
           no-fail-on-empty-changeset: "1"
-          # Agregamos parámetros mínimos necesarios
-          parameter-overrides: >-
-            ProjectName=ia-app,
-            EnvironmentName=development,
-            VpcCidr=10.10.0.0/16
-          # TAGS: Es vital que coincidan exactamente con la SCP
-          tags: |
-            Entorno=desarrollo
-            Project=ia-app
+          # Parámetros en una sola línea separados por comas
+          parameter-overrides: "ProjectName=ia-app,EnvironmentName=development,VpcCidr=10.10.0.0/16"
+          # FORMATO ESTRICTO: En una sola línea, sin comillas adicionales. 
+          # Esto evita el error de la SCP "DenyNoEntorno" en cloudformation:CreateStack
+          tags: "Entorno=desarrollo Project=ia-app"
