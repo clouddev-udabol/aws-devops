@@ -11,12 +11,10 @@ Resources:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: !Ref VpcCidr
-      EnableDnsSupport: true
-      EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value: !Sub ${ProjectName}-${EnvironmentName}-vpc
-        - Key: Entorno # Tag requerido por SCP
+          Value: ia-app-development-vpc
+        - Key: Entorno    # REQUERIDO POR SCP
           Value: desarrollo
 
   PublicSubnet:
