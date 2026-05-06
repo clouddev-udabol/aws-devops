@@ -1,40 +1,63 @@
 ﻿AWSTemplateFormatVersion: "2010-09-09"
-Description: "Budget  for SOW-001-E4-QA with daily alerts at 50%, 80%, and 100%"
+Description: "Budget for PROY-APP QA environment with daily alerts at 50%, 80%, and 100%"
 
 Parameters:
+  ProjectName:
+    Type: String
+    Default: "ia-app"
+    Description: "Project identifier"
+    AllowedValues:
+      - ia-app
+  
+  EnvironmentName:
+    Type: String
+    Default: "qa"
+    Description: "Environment name (qa maps to staging tag)"
+    AllowedValues:
+      - qa
+  
   AlertEmail:
     Type: String
     Default: "cloudmanagement@udabol.edu.bo"
-    Description: "Email para recibir alertas del budget"
-  
-  BudgetName:
-    Type: String
-    Default: "SOW-001-E4-QA-100USD"
-    Description: "Nombre del budget para SOW"
+    Description: "Email for budget alerts"
   
   BudgetAmount:
     Type: Number
     Default: 100
-    Description: "Monto del budget en USD"
+    Description: "Budget amount in USD"
+    MinValue: 1
+    MaxValue: 10000
+
+Conditions:
+  IsQA: !Equals [!Ref EnvironmentName, "qa"]
 
 Resources:
-  # SNS Topic para alertas
+  # SNS Topic for Budget Alerts
   BudgetAlertsTopic:
     Type: AWS::SNS::Topic
     Properties:
-      TopicName: !Sub "\-alerts"
-      DisplayName: "SOW Budget Alerts QA"
+      TopicName: !Sub "${ProjectName}-${EnvironmentName}-budget-alerts"
+      DisplayName: "PROY-APP Budget Alerts"
       Subscription:
         - Protocol: email
           Endpoint: !Ref AlertEmail
+      Tags:
+        - Key: Entorno
+          Value: staging  # QA environment uses staging tag per SCP policy
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Environment
+          Value: !Ref EnvironmentName
+        - Key: ManagedBy
+          Value: CloudFormation
 
-  # Budget con monitoreo diario
+  # Budget with Daily Monitoring
   Budget:
     Type: AWS::Budgets::Budget
     DependsOn: BudgetAlertsTopic
     Properties:
       Budget:
-        BudgetName: !Ref BudgetName
+        BudgetName: !Sub "${ProjectName}-${EnvironmentName}-budget"
         BudgetType: "COST"
         TimeUnit: "DAILY"
         BudgetLimit:
@@ -84,15 +107,38 @@ Resources:
             - SubscriptionType: "SNS"
               Address: !Ref BudgetAlertsTopic
 
+  # Budget Tagging (additional layer)
+  BudgetTagAssociation:
+    Type: AWS::Budgets::BudgetsAction
+    DependsOn: Budget
+    Properties:
+      AccountId: !Ref AWS::AccountId
+      BudgetName: !Sub "${ProjectName}-${EnvironmentName}-budget"
+      ActionThreshold:
+        ActionThresholdValue: 80
+        ActionThresholdType: "PERCENTAGE"
+      ActionType: "APPLY_IAM_POLICY"
+      ActionSubscribers:
+        - SubscriptionType: "SNS"
+          Address: !Ref BudgetAlertsTopic
+
 Outputs:
   BudgetName:
-    Description: "Budget name SOW"
-    Value: !Ref BudgetName
+    Description: "Budget name following naming convention"
+    Value: !Sub "${ProjectName}-${EnvironmentName}-budget"
   
   SNSTopicArn:
-    Description: "SNS Topic ARN para alertas"
+    Description: "SNS Topic ARN for budget alerts"
     Value: !Ref BudgetAlertsTopic
   
   AlertEmail:
-    Description: "Email que recibe alertas"
+    Description: "Email receiving alerts"
     Value: !Ref AlertEmail
+  
+  BudgetAmount:
+    Description: "Budget amount configured"
+    Value: !Ref BudgetAmount
+  
+  EnvironmentTag:
+    Description: "Environment tag value (staging for QA)"
+    Value: "staging"  # Per SCP policy

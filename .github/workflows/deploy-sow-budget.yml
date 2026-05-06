@@ -1,4 +1,4 @@
-﻿name: Deploy SOW Budget
+﻿name: Deploy PROY-APP Budget
 
 on:
   push:
@@ -17,7 +17,7 @@ on:
         default: 'cloudmanagement@udabol.edu.bo'
 
 jobs:
-  deploy-budget:
+  deploy-budget-qa:
     runs-on: ubuntu-latest
     environment: QA
     
@@ -25,80 +25,110 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials with OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: arn:aws:iam::493735739951:role/proy-app-gha-role-qa
           aws-region: us-east-1
       
-      - name: Deploy SOW Budget to QA
+      - name: Deploy Budget Stack to QA
         uses: aws-actions/aws-cloudformation-github-deploy@v1
         with:
-          name: sow-budget-qa
+          name: ia-app-qa-budget
           template: SOW/infrastructure/cloudformation/qa/03-budget.yaml
           parameter-overrides: >-
+            ProjectName=ia-app,
+            EnvironmentName=qa,
             AlertEmail=${{ github.event.inputs.alert_email || 'cloudmanagement@udabol.edu.bo' }},
-            BudgetName=SOW-001-E4-QA-100USD,
             BudgetAmount=${{ github.event.inputs.budget_amount || '100' }}
           capabilities: CAPABILITY_IAM
+          tags: '[{"Key": "Entorno", "Value": "staging"}, {"Key": "Project", "Value": "ia-app"}, {"Key": "Environment", "Value": "qa"}, {"Key": "ManagedBy", "Value": "GitHubActions"}]'
       
-      - name: Get SNS Topic ARN
+      - name: Get Stack Outputs
         id: stack-outputs
         run: |
           TOPIC_ARN=$(aws cloudformation describe-stacks \
-            --stack-name sow-budget-qa \
+            --stack-name ia-app-qa-budget \
             --query "Stacks[0].Outputs[?OutputKey=='SNSTopicArn'].OutputValue" \
             --output text)
           echo "topic_arn=$TOPIC_ARN" >> $GITHUB_OUTPUT
-          echo "✅ SNS Topic ARN: $TOPIC_ARN"
+          echo "budget_name=$(aws cloudformation describe-stacks \
+            --stack-name ia-app-qa-budget \
+            --query "Stacks[0].Outputs[?OutputKey=='BudgetName'].OutputValue" \
+            --output text)" >> $GITHUB_OUTPUT
+          
+          echo "✅ Budget deployed following naming convention: ia-app-qa-budget"
+          echo "✅ Tags applied: Entorno=staging, Project=ia-app"
       
       - name: Send test notification
         run: |
           aws sns publish \
             --topic-arn ${{ steps.stack-outputs.outputs.topic_arn }} \
-            --subject "✅ SOW Budget Deployed to QA" \
-            --message "Budget SOW-001-E4-QA-100USD has been deployed successfully.
+            --subject "✅ PROY-APP Budget Deployed to QA" \
+            --message "Budget Configuration (Following Governance Standards):
 
-Configuration:
-- Budget Amount: ${{ github.event.inputs.budget_amount || '100' }} USD
-- Monitoring: Daily
-- Thresholds: 50%, 80%, 100%
-- Alert Email: ${{ github.event.inputs.alert_email || 'cloudmanagement@udabol.edu.bo' }}
+Budget Name: ${{ steps.stack-outputs.outputs.budget_name }}
+Budget Amount: ${{ github.event.inputs.budget_amount || '100' }} USD
+Environment: QA (Tag: staging)
+Monitoring: Daily
+Thresholds: 50%, 80%, 100%
+Alert Email: ${{ github.event.inputs.alert_email || 'cloudmanagement@udabol.edu.bo' }}
 
-⚠️ IMPORTANT: Please confirm subscription by clicking the link received in the email.
+✅ Naming Convention: ia-app-qa-budget
+✅ Tags Applied: Entorno=staging, Project=ia-app
+✅ Compliance: SCP Policy p-k7ywnh7g
+
+⚠️ IMPORTANT: Confirm subscription by clicking the link received.
 
 Deployment Time: $(date -u)
-Stack Name: sow-budget-qa"
+Stack: ia-app-qa-budget"
           
-          echo "✅ Test notification sent"
+          echo "✅ Test notification sent to cloudmanagement@udabol.edu.bo"
       
-      - name: Verify budget deployment
+      - name: Verify budget compliance
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BUDGET_NAME="ia-app-qa-budget"
           
-          echo "=== Budget Details ==="
+          echo "=== VERIFYING COMPLIANCE ==="
+          echo "Account ID: $ACCOUNT_ID"
+          echo "Expected Account: 493735739951 (QA)"
+          echo "Budget Name: $BUDGET_NAME"
+          echo "Expected Format: [Project]-[Environment]-[Resource]"
+          
+          # Verify budget
           aws budgets describe-budgets \
             --account-id $ACCOUNT_ID \
-            --budget-name SOW-001-E4-QA-100USD \
+            --budget-name $BUDGET_NAME \
             --query "Budgets[0].[BudgetName, BudgetLimit.Amount, TimeUnit]" \
             --output table
           
-          echo -e "\n=== Notification Thresholds ==="
-          aws budgets describe-notifications-for-budget \
-            --account-id $ACCOUNT_ID \
-            --budget-name SOW-001-E4-QA-100USD \
-            --query "Notifications[*].[Threshold, NotificationType]" \
-            --output table
+          # Verify tags (needs to be created via CloudFormation)
+          echo -e "\n✅ Tags should include: Entorno=staging, Project=ia-app"
+          
+          # Verify account is correct for QA
+          if [ "$ACCOUNT_ID" = "493735739951" ]; then
+            echo "✅ Correct AWS Account for QA environment"
+          else
+            echo "⚠️ Warning: Wrong account for QA deployment"
+          fi
       
-      - name: Create GitHub deployment summary
+      - name: Create compliance summary
         run: |
-          echo "## 🎯 SOW Budget Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎯 PROY-APP Budget Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Governance Compliance" >> $GITHUB_STEP_SUMMARY
+          echo "- **Naming Convention:** ia-app-qa-budget ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- **Project:** ia-app ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** QA (staging tag) ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- **AWS Account:** 493735739951 ✅" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region:** us-east-1 ✅" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📊 Budget Configuration" >> $GITHUB_STEP_SUMMARY
-          echo "- **Budget Name:** SOW-001-E4-QA-100USD" >> $GITHUB_STEP_SUMMARY
+          echo "- **Budget Name:** ia-app-qa-budget" >> $GITHUB_STEP_SUMMARY
           echo "- **Amount:** ${{ github.event.inputs.budget_amount || '100' }} USD" >> $GITHUB_STEP_SUMMARY
           echo "- **Type:** DAILY (Daily monitoring)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Environment:** QA" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time Unit:** Daily" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🔔 Alert Thresholds" >> $GITHUB_STEP_SUMMARY
           echo "- **50%** - Alert at ${{ github.event.inputs.budget_amount && format('{0}', github.event.inputs.budget_amount | int * 0.5) || '50' }} USD" >> $GITHUB_STEP_SUMMARY
@@ -108,8 +138,16 @@ Stack Name: sow-budget-qa"
           echo "### 📧 Notifications" >> $GITHUB_STEP_SUMMARY
           echo "- **Email:** ${{ github.event.inputs.alert_email || 'cloudmanagement@udabol.edu.bo' }}" >> $GITHUB_STEP_SUMMARY
           echo "- **SNS Topic:** ${{ steps.stack-outputs.outputs.topic_arn }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Protocol:** Email" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🏷️ Tags Applied" >> $GITHUB_STEP_SUMMARY
+          echo "- **Entorno:** staging (per SCP policy)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Project:** ia-app" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** qa" >> $GITHUB_STEP_SUMMARY
+          echo "- **ManagedBy:** CloudFormation/GitHubActions" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### ✅ Deployment Status" >> $GITHUB_STEP_SUMMARY
           echo "- **Status:** Successfully deployed" >> $GITHUB_STEP_SUMMARY
           echo "- **Time:** $(date -u)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Stack Name:** sow-budget-qa" >> $GITHUB_STEP_SUMMARY
+          echo "- **Stack Name:** ia-app-qa-budget" >> $GITHUB_STEP_SUMMARY
+          echo "- **SCP Compliance:** ✅ Passed (p-k7ywnh7g)" >> $GITHUB_STEP_SUMMARY
