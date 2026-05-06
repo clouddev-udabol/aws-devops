@@ -29,7 +29,7 @@ jobs:
       - name: Verify AWS Identity
         run: aws sts get-caller-identity
 
-      - - name: Deploy VPC Stack
+      - name: Deploy VPC Stack
         uses: aws-actions/aws-cloudformation-github-deploy@v1
         with:
           name: sow-001-vpc-dev
