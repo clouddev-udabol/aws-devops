@@ -1,19 +1,26 @@
-
 name: "[E1/E3] AWS Infrastructure Deployment"
 
+# 1. Eventos de disparo
 on:
   push:
     branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main" ]
   workflow_dispatch:
 
+# 2. Permisos globales (CORREGIDO: Deben ir aquí)
 permissions:
-  id-token: write
-  contents: read
+  id-token: write   # Necesario para OIDC
+  contents: read    # Necesario para leer el código
 
+# 3. Definición de tareas
 jobs:
   deploy-dev:
+    name: "Deploy to Development"
     runs-on: ubuntu-latest
-
+    # Solo despliega si estamos en la rama main o develop
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -23,6 +30,7 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_DEV }}
           aws-region: us-east-1
+          role-session-name: gha-session-${{ github.run_id }}
 
       - name: Verify AWS Identity
         run: aws sts get-caller-identity
