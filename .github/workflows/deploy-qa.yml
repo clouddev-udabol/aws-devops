@@ -1,0 +1,40 @@
+name: "[E1/E3] AWS QA Infrastructure Deployment"
+
+on:
+  push:
+    branches: [ "main" ] # QA suele dispararse desde main tras validación en develop
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-qa:
+    name: "Deploy to QA Environment"
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Debes configurar este secreto en GitHub con el ARN del Rol en la cuenta 493735739951
+          role-to-assume: ${{ vars.AWS_ROLE_QA }} 
+          aws-region: us-east-1
+          role-session-name: gha-session-qa-${{ github.run_id }}
+
+      - name: Deploy VPC QA Stack
+        uses: aws-actions/aws-cloudformation-github-deploy@v1
+        with:
+          name: sow-001-vpc-qa
+          template: SOW/infrastructure/cloudformation/qa/01-vpc.yaml
+          no-fail-on-empty-changeset: "1"
+          parameter-overrides: >-
+            ProjectName=ia-app,
+            EnvironmentName=qa,
+            VpcCidr=10.20.0.0/16
+          # IMPORTANTE: El tag debe coincidir con lo que la SCP espere para QA
+          tags: '[{"Key": "Entorno", "Value": "qa"}, {"Key": "Project", "Value": "ia-app"}]'
