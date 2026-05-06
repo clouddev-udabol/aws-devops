@@ -21,7 +21,7 @@ Resources:
           Value: !Sub ${ProjectName}-${EnvironmentName}-vpc
         # Tag de cumplimiento para la SCP multi-cuenta
         - Key: Entorno
-          Value: staging
+          Value: qa
         - Key: Project
           Value: !Ref ProjectName
 
@@ -36,7 +36,7 @@ Resources:
         - Key: Name
           Value: !Sub ${ProjectName}-${EnvironmentName}-public-sn
         - Key: Entorno
-          Value: staging
+          Value: qa
 
 Outputs:
   VpcId:
