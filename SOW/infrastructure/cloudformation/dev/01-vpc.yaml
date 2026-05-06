@@ -1,15 +1,10 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: '[E1] VPC Infrastructure for Development Environment'
+Description: '[E1] VPC Infrastructure with Mandatory Tags'
 
 Parameters:
-  ProjectName:
-    Type: String
-  EnvironmentName:
-    Type: String
-  VpcCidr:
-    Type: String
-  AvailabilityZone:
-    Type: String
+  ProjectName: { Type: String }
+  EnvironmentName: { Type: String }
+  VpcCidr: { Type: String }
 
 Resources:
   VPC:
@@ -21,20 +16,17 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub ${ProjectName}-${EnvironmentName}-vpc
+        - Key: Entorno # Tag requerido por SCP
+          Value: desarrollo
 
   PublicSubnet:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: !Ref AvailabilityZone
-      CidrBlock: !Select [ 0, !Cidr [ !Ref VpcCidr, 3, 8 ] ]
-      MapPublicIpOnLaunch: true
+      AvailabilityZone: us-east-1a
+      CidrBlock: !Select [ 0, !Cidr [ !Ref VpcCidr, 1, 8 ] ]
       Tags:
         - Key: Name
           Value: !Sub ${ProjectName}-${EnvironmentName}-pub-sub
-
-Outputs:
-  VpcId:
-    Value: !Ref VPC
-    Export:
-      Name: !Sub ${ProjectName}-${EnvironmentName}-VpcId
+        - Key: Entorno # Tag requerido por SCP
+          Value: desarrollo
