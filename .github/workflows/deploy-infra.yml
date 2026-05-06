@@ -6,22 +6,28 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write
-  contents: read
+  id-token: write   # Obligatorio para OIDC
+  contents: read    # Obligatorio para leer el código
 
 jobs:
   deploy-dev:
     name: "Deploy to Development"
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials
+      - name: Configure AWS Credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_DEV }}
           aws-region: us-east-1
+          role-session-name: gha-session-${{ github.run_id }}
+
+      - name: Verify AWS Identity
+        run: aws sts get-caller-identity
 
       - name: Deploy VPC Stack
         uses: aws-actions/aws-cloudformation-github-deploy@v1
@@ -33,7 +39,8 @@ jobs:
             EnvironmentName=development,
             VpcCidr=10.10.0.0/16
           no-fail-on-empty-changeset: "1"
-          # LLAVE DE LA SOLUCIÓN: Tags obligatorios para pasar la SCP
+          # LLAVE DE ORO: Tags obligatorios para cumplir la SCP p-lgafaevf
           tags: |
             Entorno=desarrollo
             Project=ia-app
+            ManagedBy=github-actions
