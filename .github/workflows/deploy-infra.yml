@@ -1,39 +1,27 @@
 name: "[E1/E3] AWS Infrastructure Deployment"
 
-# 1. Eventos de disparo
 on:
   push:
     branches: [ "main", "develop" ]
-  pull_request:
-    branches: [ "main" ]
   workflow_dispatch:
 
-# 2. Permisos globales (CORREGIDO: Deben ir aquí)
 permissions:
-  id-token: write   # Necesario para OIDC
-  contents: read    # Necesario para leer el código
+  id-token: write
+  contents: read
 
-# 3. Definición de tareas
 jobs:
   deploy-dev:
     name: "Deploy to Development"
     runs-on: ubuntu-latest
-    # Solo despliega si estamos en la rama main o develop
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
-    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Configure AWS Credentials via OIDC
+      - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_DEV }}
           aws-region: us-east-1
-          role-session-name: gha-session-${{ github.run_id }}
-
-      - name: Verify AWS Identity
-        run: aws sts get-caller-identity
 
       - name: Deploy VPC Stack
         uses: aws-actions/aws-cloudformation-github-deploy@v1
@@ -43,6 +31,9 @@ jobs:
           parameter-overrides: >-
             ProjectName=ia-app,
             EnvironmentName=development,
-            VpcCidr=10.10.0.0/16,
-            AvailabilityZone=us-east-1a
+            VpcCidr=10.10.0.0/16
           no-fail-on-empty-changeset: "1"
+          # LLAVE DE LA SOLUCIÓN: Tags obligatorios para pasar la SCP
+          tags: |
+            Entorno=desarrollo
+            Project=ia-app
