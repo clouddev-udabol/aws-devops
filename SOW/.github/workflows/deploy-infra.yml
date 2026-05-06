@@ -1,0 +1,31 @@
+name: "[E3] AWS Infrastructure Deployment"
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+permissions:
+  [cite_start]id-token: write   # REQUERIDO para OIDC [cite: 1169]
+  [cite_start]contents: read    # REQUERIDO para leer el código [cite: 1169]
+
+jobs:
+  verify-aws-conn:
+    name: "Verify AWS Connection"
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Usaremos variables de GitHub para mayor seguridad [cite: 1170]
+          role-to-assume: ${{ vars.AWS_ROLE_DEV }}
+          aws-region: us-east-1
+          role-session-name: gha-session-${{ github.run_id }}
+
+      - name: Verify Identity
+        [cite_start]run: aws sts get-caller-identity # Debe mostrar la cuenta 245650696072 [cite: 1171]
