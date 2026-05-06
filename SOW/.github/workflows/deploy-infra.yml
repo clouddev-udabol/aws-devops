@@ -29,3 +29,15 @@ jobs:
 
       - name: Verify Identity
         [cite_start]run: aws sts get-caller-identity # Debe mostrar la cuenta 245650696072 [cite: 1171]
+
+      - name: Deploy CloudFormation Stack
+        uses: aws-actions/aws-cloudformation-github-deploy@v1
+        with:
+          name: !Sub sow-001-vpc-${{ vars.ENVIRONMENT }}
+          template: SOW/infrastructure/cloudformation/dev/01-vpc.yaml
+          parameter-overrides: >-
+            ProjectName=ia-app,
+            EnvironmentName=development,
+            VpcCidr=10.10.0.0/16,
+            AvailabilityZone=us-east-1a
+          no-fail-on-empty-changeset: "1"
