@@ -2,19 +2,18 @@ name: "[E1/E3] AWS Infrastructure Deployment"
 
 on:
   push:
-    branches: [ "main", "develop" ]
+    branches: [ "main" ]
   workflow_dispatch:
 
 permissions:
-  id-token: write   # Obligatorio para OIDC
-  contents: read    # Obligatorio para leer el código
+  id-token: write
+  contents: read
 
 jobs:
   deploy-dev:
     name: "Deploy to Development"
     runs-on: ubuntu-latest
-    # Se ejecuta solo si es la rama develop o main (según tu estándar SOW)
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    if: github.ref == 'refs/heads/main'
     
     steps:
       - name: Checkout Code
@@ -35,20 +34,13 @@ jobs:
         with:
           name: sow-001-vpc-dev
           template: SOW/infrastructure/cloudformation/dev/01-vpc.yaml
-          # Los parámetros deben coincidir con la definición de tu 01-vpc.yaml
+          no-fail-on-empty-changeset: "1"
+          # Agregamos parámetros mínimos necesarios
           parameter-overrides: >-
             ProjectName=ia-app,
             EnvironmentName=development,
-            VpcCidr=10.10.0.0/16,
-            TicketId=SOW-001,
-            AvailabilityZone=us-east-1a
-          no-fail-on-empty-changeset: "1"
-          # REQUISITO CRÍTICO: Tags para cumplir con la SCP p-lgafaevf
-          # La SCP exige "Entorno=desarrollo" (en minúsculas)
+            VpcCidr=10.10.0.0/16
+          # TAGS: Es vital que coincidan exactamente con la SCP
           tags: |
             Entorno=desarrollo
             Project=ia-app
-            ManagedBy=cloudformation
-            Application=platform
-            Owner=cloudmanagement@udabol.edu.bo
-            TicketId=SOW-001

@@ -1,30 +1,54 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: '[E1] VPC Infrastructure with Mandatory Tags'
+Description: 'VPC Infrastructure with Mandatory Governance Tags for SCP Compliance'
 
 Parameters:
-  ProjectName: { Type: String }
-  EnvironmentName: { Type: String }
-  VpcCidr: { Type: String }
+  ProjectName:
+    Type: String
+    Default: ia-app
+  EnvironmentName:
+    Type: String
+    Default: desarrollo
+  VpcCidr:
+    Type: String
+    Default: 10.10.0.0/16
 
 Resources:
+  # El recurso principal suele ser el que dispara el bloqueo
   VPC:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value: ia-app-development-vpc
-        - Key: Entorno    # REQUERIDO POR SCP
+          Value: !Sub ${ProjectName}-${EnvironmentName}-vpc
+        # ESTE TAG ES EL QUE BUSCA LA SCP p-lgafaevf
+        - Key: Entorno
           Value: desarrollo
+        - Key: Project
+          Value: !Ref ProjectName
 
-  PublicSubnet:
-    Type: AWS::EC2::Subnet
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-${EnvironmentName}-igw
+        - Key: Entorno
+          Value: desarrollo
+        - Key: Project
+          Value: !Ref ProjectName
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
     Properties:
       VpcId: !Ref VPC
-      AvailabilityZone: us-east-1a
-      CidrBlock: !Select [ 0, !Cidr [ !Ref VpcCidr, 1, 8 ] ]
-      Tags:
-        - Key: Name
-          Value: !Sub ${ProjectName}-${EnvironmentName}-pub-sub
-        - Key: Entorno # Tag requerido por SCP
-          Value: desarrollo
+      InternetGatewayId: !Ref InternetGateway
+
+Outputs:
+  VpcId:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub ${ProjectName}-${EnvironmentName}-VpcId
