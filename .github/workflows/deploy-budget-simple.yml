@@ -1,0 +1,32 @@
+﻿name: Deploy PROY-APP Budget (Simplified)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::493735739951:role/proy-app-gha-role-qa
+          aws-region: us-east-1
+      
+      - name: Deploy Budget
+        run: |
+          aws cloudformation deploy \
+            --template-file SOW/infrastructure/cloudformation/qa/03-budget.yaml \
+            --stack-name ia-app-qa-budget \
+            --parameter-overrides ProjectName=ia-app EnvironmentName=qa AlertEmail=cloudmanagement@udabol.edu.bo BudgetAmount=100 \
+            --capabilities CAPABILITY_IAM \
+            --tags Entorno=staging Project=ia-app Environment=qa
+          
+          echo "Budget deployed successfully"
+          
+          TOPIC_ARN=$(aws cloudformation describe-stacks --stack-name ia-app-qa-budget --query "Stacks[0].Outputs[?OutputKey=='SNSTopicArn'].OutputValue" --output text)
+          
+          aws sns publish --topic-arn $TOPIC_ARN --subject "Budget Active" --message "Budget 100 USD configured with alerts at 50%, 80%, 100%"
