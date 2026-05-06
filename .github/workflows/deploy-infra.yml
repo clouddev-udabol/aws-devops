@@ -1,0 +1,40 @@
+
+name: "[E1/E3] AWS Infrastructure Deployment"
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-dev:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_DEV }}
+          aws-region: us-east-1
+
+      - name: Verify AWS Identity
+        run: aws sts get-caller-identity
+
+      - name: Deploy VPC Stack
+        uses: aws-actions/aws-cloudformation-github-deploy@v1
+        with:
+          name: sow-001-vpc-dev
+          template: SOW/infrastructure/cloudformation/dev/01-vpc.yaml
+          parameter-overrides: >-
+            ProjectName=ia-app,
+            EnvironmentName=development,
+            VpcCidr=10.10.0.0/16,
+            AvailabilityZone=us-east-1a
+          no-fail-on-empty-changeset: "1"
