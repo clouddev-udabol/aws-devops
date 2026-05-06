@@ -1,0 +1,127 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'SOW-001: AWS Budgets and Cost Alerts (E4)'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [development, staging]
+    Description: Entorno de despliegue
+  BudgetAmountUsd:
+    Type: Number
+    Default: 100
+    Description: Limite mensual del presupuesto en USD
+  NotificationEmail:
+    Type: String
+    Default: cloudmanagement@udabol.edu.bo
+    Description: Correo para recibir las alertas
+
+Resources:
+  # 1. Topic de SNS para Alertas
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "PROY-app-alerts-${EnvironmentName}"
+      Subscription:
+        - Endpoint: !Ref NotificationEmail
+          Protocol: email
+      Tags:
+        - Key: Entorno
+          Value: !Ref EnvironmentName
+        - Key: Project
+          Value: ia-app
+
+  # 2. Politica para permitir que Budgets y EventBridge publiquen en el Topic
+  AlertsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref AlertsTopic
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowBudgetsToPublish
+            Effect: Allow
+            Principal:
+              Service: budgets.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref AlertsTopic
+          - Sid: AllowEventBridgeToPublish
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref AlertsTopic
+
+  # 3. Presupuesto Mensual de AWS
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub "PROY-app-budget-${EnvironmentName}"
+        BudgetLimit:
+          Amount: !Ref BudgetAmountUsd
+          Unit: USD
+        TimeUnit: MONTHLY
+        BudgetType: COST
+      NotificationsWithSubscribers:
+        # Alerta al 50% (Actual)
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 50
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref AlertsTopic
+        # Alerta al 80% (Actual)
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref AlertsTopic
+        # Alerta al 100% (Actual)
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref AlertsTopic
+        # Alerta Temprana 100% (Forecasted)
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref AlertsTopic
+
+  # 4. (Opcional pero requerido en E4) EventBridge Rule para alertar creacion de recursos costosos
+  NewResourceAlertRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "PROY-app-new-resource-${EnvironmentName}"
+      Description: "Alerta sobre creacion de recursos facturables"
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.ec2
+          - aws.rds
+          - aws.s3
+        detail-type:
+          - "AWS API Call via CloudTrail"
+        detail:
+          eventName:
+            - RunInstances
+            - CreateDBInstance
+            - CreateBucket
+      Targets:
+        - Arn: !Ref AlertsTopic
+          Id: "SNSTarget"
+
+Outputs:
+  AlertsTopicArn:
+    Value: !Ref AlertsTopic
+    Export:
+      Name: !Sub "PROY-app-alerts-topic-${EnvironmentName}"
