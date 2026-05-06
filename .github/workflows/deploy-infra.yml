@@ -29,14 +29,12 @@ jobs:
       - name: Verify AWS Identity
         run: aws sts get-caller-identity
 
-      - name: Deploy VPC Stack
+      - - name: Deploy VPC Stack
         uses: aws-actions/aws-cloudformation-github-deploy@v1
         with:
           name: sow-001-vpc-dev
           template: SOW/infrastructure/cloudformation/dev/01-vpc.yaml
           no-fail-on-empty-changeset: "1"
-          # Parámetros en una sola línea separados por comas
           parameter-overrides: "ProjectName=ia-app,EnvironmentName=development,VpcCidr=10.10.0.0/16"
-          # FORMATO ESTRICTO: En una sola línea, sin comillas adicionales. 
-          # Esto evita el error de la SCP "DenyNoEntorno" en cloudformation:CreateStack
-          tags: "Entorno=desarrollo Project=ia-app"
+          # FORMATO JSON OBLIGATORIO PARA ESTA ACCIÓN DE GITHUB:
+          tags: '[{"Key": "Entorno", "Value": "desarrollo"}, {"Key": "Project", "Value": "ia-app"}]'
