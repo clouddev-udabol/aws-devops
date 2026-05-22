@@ -690,6 +690,7 @@ Resources:
   # VPC FLOW LOGS
   # ----------------------------------------------------------
   FlowLogsLogGroup:
+    # checkov:skip=CKV_AWS_158:KMS encryption for Flow Logs CW LogGroup deferred to SOW-002 (cost/complexity tradeoff for baseline VPC)
     Type: AWS::Logs::LogGroup
     Condition: CreateFlowLogs
     Properties:
