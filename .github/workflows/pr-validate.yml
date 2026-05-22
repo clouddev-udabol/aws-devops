@@ -158,7 +158,7 @@ jobs:
 
       - name: '[CI-IAC-105] Validate templates'
         run: |
-          shopt -s globstar
+          shopt -s globstar nullglob
           for tpl in cloudformation/**/*.yaml budgets/*.yaml; do
             echo "Validando: $tpl"
             aws cloudformation validate-template \
