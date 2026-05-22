@@ -1,0 +1,212 @@
+# ============================================================
+# iaapp — UDABOL — [CD] Deploy a Non-Production (DEV / QA)
+#
+# Trigger:
+#   - Auto: push a main → despliega a DEV
+#   - Manual: workflow_dispatch → desarrollador elige DEV o QA
+#
+# Cuentas AWS:
+#   DEV: 245650696072
+#   QA:  493735739951
+#
+# IDs de proceso:
+#   [CD-INI-101] Checkout
+#   [CD-SET-102] OIDC + caller identity
+#   [CD-IAC-103] Validate templates
+#   [CD-DEP-104] Deploy stack
+#   [CD-OPS-105] Smoke test
+#   [CD-FIN-106] Summary
+# ============================================================
+
+name: deploy-nonprod
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloudformation/**'
+      - 'parameters/**'
+      - 'budgets/**'
+      - '.github/workflows/deploy-nonprod.yml'
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Ambiente destino'
+        required: true
+        type: choice
+        options: [dev, qa]
+        default: dev
+      stack:
+        description: 'Stack a desplegar'
+        required: true
+        type: choice
+        options: [vpc, budgets, all]
+        default: vpc
+      enable_nat_gateway:
+        description: 'Habilitar NAT Gateway (~$32/mes c/u)'
+        type: boolean
+        default: true
+
+concurrency:
+  group: deploy-nonprod-${{ github.event.inputs.environment || 'dev' }}
+  cancel-in-progress: false  # NO cancelar deploys en curso
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT: iaapp
+  COMPANY: udabol
+
+jobs:
+
+  # ----------------------------------------------------------
+  # JOB 1 — Determinar ambiente y configuración
+  # ----------------------------------------------------------
+  context:
+    name: '[CD] Resolver contexto'
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+      account_id: ${{ steps.resolve.outputs.account_id }}
+      role_arn: ${{ steps.resolve.outputs.role_arn }}
+    steps:
+      - id: resolve
+        env:
+          ROLE_DEV: ${{ vars.AWS_ROLE_DEV }}
+          ROLE_QA: ${{ vars.AWS_ROLE_QA }}
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            ENV=dev
+          else
+            ENV=${{ github.event.inputs.environment }}
+          fi
+
+          case $ENV in
+            dev) ROLE=$ROLE_DEV ;;
+            qa)  ROLE=$ROLE_QA  ;;
+            *)
+              echo "ERROR: ambiente '$ENV' no soportado en este workflow"
+              exit 1
+              ;;
+          esac
+
+          ACCOUNT=$(echo "$ROLE" | cut -d: -f5)
+
+          echo "environment=${ENV}" >> $GITHUB_OUTPUT
+          echo "account_id=${ACCOUNT}" >> $GITHUB_OUTPUT
+          echo "role_arn=${ROLE}" >> $GITHUB_OUTPUT
+
+          echo "::notice::Desplegando a ${ENV} (cuenta ${ACCOUNT})"
+
+  # ----------------------------------------------------------
+  # JOB 2 — Deploy VPC
+  # ----------------------------------------------------------
+  deploy-vpc:
+    name: '[CD] Deploy VPC ${{ needs.context.outputs.environment }}'
+    needs: context
+    runs-on: ubuntu-latest
+    environment: ${{ needs.context.outputs.environment }}
+    if: |
+      github.event_name == 'push' ||
+      github.event.inputs.stack == 'vpc' ||
+      github.event.inputs.stack == 'all'
+    steps:
+
+      - name: '[CD-INI-101] Checkout'
+        uses: actions/checkout@v4
+
+      - name: '[CD-SET-102] Configure AWS via OIDC'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ needs.context.outputs.role_arn }}
+          role-session-name: iaapp-deploy-vpc-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: '[CD-SET-103] Verify identity'
+        run: aws sts get-caller-identity
+
+      - name: '[CD-IAC-104] Validate template'
+        run: |
+          aws cloudformation validate-template \
+            --template-body file://cloudformation/modules/vpc/vpc.yaml \
+            --region ${{ env.AWS_REGION }}
+
+      - name: '[CD-DEP-105] Deploy VPC'
+        env:
+          ENV: ${{ needs.context.outputs.environment }}
+          NAT_GW: ${{ github.event.inputs.enable_nat_gateway || 'true' }}
+        run: |
+          STACK_NAME=${{ env.PROJECT }}-vpc-${ENV}
+          SHA=${GITHUB_SHA::7}
+          DATE=$(date -u +%Y-%m-%d)
+
+          echo "[CD-DEP-105] Deploying ${STACK_NAME}"
+          echo "  Account:    ${{ needs.context.outputs.account_id }}"
+          echo "  Region:     ${{ env.AWS_REGION }}"
+          echo "  CommitHash: ${SHA}"
+          echo "  Date:       ${DATE}"
+
+          ./scripts/deploy.sh ${ENV} vpc
+
+      - name: '[CD-OPS-106] Print outputs'
+        env:
+          ENV: ${{ needs.context.outputs.environment }}
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name ${{ env.PROJECT }}-vpc-${ENV} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Stacks[0].Outputs[*].[OutputKey,OutputValue]' \
+            --output table
+
+  # ----------------------------------------------------------
+  # JOB 3 — Deploy Budgets (solo si stack=budgets o all)
+  # ----------------------------------------------------------
+  deploy-budgets:
+    name: '[CD] Deploy Budgets ${{ needs.context.outputs.environment }}'
+    needs: context
+    runs-on: ubuntu-latest
+    environment: ${{ needs.context.outputs.environment }}
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      (github.event.inputs.stack == 'budgets' || github.event.inputs.stack == 'all')
+    steps:
+
+      - name: '[CD-INI-201] Checkout'
+        uses: actions/checkout@v4
+
+      - name: '[CD-SET-202] Configure AWS via OIDC'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ needs.context.outputs.role_arn }}
+          role-session-name: iaapp-deploy-budgets-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: '[CD-DEP-203] Deploy Budgets'
+        env:
+          ENV: ${{ needs.context.outputs.environment }}
+        run: ./scripts/deploy.sh ${ENV} budgets
+
+  # ----------------------------------------------------------
+  # JOB 4 — Resumen final
+  # ----------------------------------------------------------
+  summary:
+    name: '[CD] Summary'
+    needs: [context, deploy-vpc]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: '[CD-FIN-301] Print summary'
+        run: |
+          echo "================================================"
+          echo "  iaapp — Deploy Non-Production"
+          echo "================================================"
+          echo "  Environment:  ${{ needs.context.outputs.environment }}"
+          echo "  Account:      ${{ needs.context.outputs.account_id }}"
+          echo "  VPC deploy:   ${{ needs.deploy-vpc.result }}"
+          echo "  Triggered by: ${{ github.actor }}"
+          echo "  Commit:       ${{ github.sha }}"
+          echo "================================================"
