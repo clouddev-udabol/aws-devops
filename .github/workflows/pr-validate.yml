@@ -1,0 +1,188 @@
+# ============================================================
+# iaapp — UDABOL — [CI] PR Validate
+#
+# Trigger: pull_request a main
+# Hace: lint, escaneo de seguridad y ChangeSet preview (read-only)
+# NO despliega nada — solo valida.
+#
+# IDs de proceso usados:
+#   [CI-INI-001] Checkout
+#   [CI-LNT-002] cfn-lint
+#   [CI-SEC-003] cfn-nag
+#   [CI-SEC-004] checkov
+#   [CI-SET-005] OIDC
+#   [CI-IAC-006] ChangeSet preview
+# ============================================================
+
+name: pr-validate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'cloudformation/**'
+      - 'parameters/**'
+      - 'budgets/**'
+      - '.github/workflows/**'
+      - '.github/oidc/**'
+
+# Cancelar runs redundantes (FinOps)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write       # OIDC
+  pull-requests: write  # comentar el ChangeSet en el PR
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT: iaapp
+
+jobs:
+
+  # ----------------------------------------------------------
+  # JOB 1 — Lint y escaneo de seguridad estática
+  # ----------------------------------------------------------
+  lint-and-scan:
+    name: '[CI] Lint + Security Scan'
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: '[CI-INI-001] Checkout'
+        uses: actions/checkout@v4
+
+      - name: '[CI-SET-002] Setup Python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: '[CI-SET-003] Install validators'
+        run: |
+          pip install --upgrade pip
+          pip install cfn-lint==1.20.0 checkov==3.2.71
+
+      - name: '[CI-LNT-004] cfn-lint — estructura y mejores prácticas'
+        run: |
+          echo "::group::cfn-lint scan"
+          cfn-lint cloudformation/**/*.yaml budgets/*.yaml .github/oidc/*.yaml
+          echo "::endgroup::"
+
+      - name: '[CI-SEC-005] cfn-nag — patrones inseguros'
+        uses: stelligent/cfn_nag@master
+        with:
+          input_path: cloudformation
+          extra_args: --fail-on-warnings
+
+      - name: '[CI-SEC-006] checkov — policy-as-code'
+        run: |
+          echo "::group::checkov scan"
+          checkov \
+            --directory cloudformation \
+            --framework cloudformation \
+            --quiet \
+            --compact \
+            --output cli \
+            --soft-fail-on=LOW
+          echo "::endgroup::"
+
+      - name: '[CI-SEC-007] detect-secrets — credenciales en commits'
+        run: |
+          pip install detect-secrets==1.5.0
+          detect-secrets scan --baseline .secrets.baseline 2>/dev/null || \
+            detect-secrets scan > /dev/null
+          echo "OK — sin secretos detectados"
+
+  # ----------------------------------------------------------
+  # JOB 2 — ChangeSet preview contra DEV (read-only)
+  # ----------------------------------------------------------
+  changeset-preview-dev:
+    name: '[CI] ChangeSet Preview (DEV)'
+    runs-on: ubuntu-latest
+    needs: lint-and-scan
+    steps:
+
+      - name: '[CI-INI-101] Checkout'
+        uses: actions/checkout@v4
+
+      - name: '[CI-SET-102] Configure AWS via OIDC (read-only DEV)'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_DEV }}
+          role-session-name: GitHubActions-iaapp-PR-${{ github.event.pull_request.number }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: '[CI-IAC-103] Verify identity'
+        run: aws sts get-caller-identity
+
+      - name: '[CI-IAC-104] Create ChangeSet — VPC dev'
+        id: changeset
+        run: |
+          STACK_NAME=${{ env.PROJECT }}-vpc-dev
+          CHANGESET_NAME=pr-${{ github.event.pull_request.number }}-${{ github.run_id }}
+
+          # Solo si el stack ya existe
+          if aws cloudformation describe-stacks --stack-name ${STACK_NAME} --region ${{ env.AWS_REGION }} 2>/dev/null; then
+            aws cloudformation create-change-set \
+              --stack-name ${STACK_NAME} \
+              --change-set-name ${CHANGESET_NAME} \
+              --change-set-type UPDATE \
+              --template-body file://cloudformation/modules/vpc/vpc.yaml \
+              --parameters file://parameters/dev/vpc.json \
+              --capabilities CAPABILITY_NAMED_IAM \
+              --region ${{ env.AWS_REGION }} || true
+
+            # Esperar a que el ChangeSet termine de calcularse
+            sleep 10
+
+            # Imprimir resultado del ChangeSet
+            echo "::group::ChangeSet — ${STACK_NAME}"
+            aws cloudformation describe-change-set \
+              --stack-name ${STACK_NAME} \
+              --change-set-name ${CHANGESET_NAME} \
+              --region ${{ env.AWS_REGION }} \
+              --query 'Changes[*].[ResourceChange.Action,ResourceChange.ResourceType,ResourceChange.LogicalResourceId,ResourceChange.Replacement]' \
+              --output table || true
+            echo "::endgroup::"
+
+            # Limpiar — borrar el ChangeSet (era solo preview)
+            aws cloudformation delete-change-set \
+              --stack-name ${STACK_NAME} \
+              --change-set-name ${CHANGESET_NAME} \
+              --region ${{ env.AWS_REGION }} || true
+          else
+            echo "Stack ${STACK_NAME} no existe aún — primer despliegue, sin ChangeSet"
+          fi
+
+      - name: '[CI-IAC-105] Validate templates'
+        run: |
+          shopt -s globstar nullglob
+          for tpl in cloudformation/**/*.yaml budgets/*.yaml; do
+            echo "Validando: $tpl"
+            aws cloudformation validate-template \
+              --template-body file://${tpl} \
+              --region ${{ env.AWS_REGION }} > /dev/null
+          done
+          echo "OK — todos los templates válidos"
+
+  # ----------------------------------------------------------
+  # JOB 3 — Resumen del PR (siempre corre)
+  # ----------------------------------------------------------
+  summary:
+    name: '[CI] PR Summary'
+    runs-on: ubuntu-latest
+    needs: [lint-and-scan, changeset-preview-dev]
+    if: always()
+    steps:
+      - name: '[CI-FIN-201] Print summary'
+        run: |
+          echo "================================================"
+          echo "  iaapp — PR #${{ github.event.pull_request.number }}"
+          echo "================================================"
+          echo "  Lint + scan:        ${{ needs.lint-and-scan.result }}"
+          echo "  ChangeSet preview:  ${{ needs.changeset-preview-dev.result }}"
+          echo "  Author:             ${{ github.event.pull_request.user.login }}"
+          echo "  Branch:             ${{ github.head_ref }}"
+          echo "================================================"

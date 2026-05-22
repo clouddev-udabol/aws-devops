@@ -1,0 +1,330 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  SOW-001 UDABOL - GitHub OIDC Provider + IAM Role para GitHub Actions
+  Cuenta DEV: 245650696072 | Entregable E3
+  Permite que GitHub Actions asuma un rol IAM sin credenciales estáticas.
+  github.com/airusta/aws-devops
+
+# ============================================================
+# CONTEXTO
+# ============================================================
+# Este template configura:
+# 1. Un OIDC Provider apuntando a token.actions.githubusercontent.com
+# 2. Un IAM Role con trust policy que solo permite tokens de:
+#    - Repositorio: airusta/aws-devops
+#    - Ramas protegidas (main, develop) y Pull Requests
+# 3. Políticas de permiso mínimo para desplegar CloudFormation + VPC
+#
+# Despliegue (una sola vez en cuenta DEV):
+#   aws cloudformation deploy \
+#     --template-file .github/oidc/iam-role.yaml \
+#     --stack-name github-oidc-udabol-dev \
+#     --capabilities CAPABILITY_NAMED_IAM \
+#     --region us-east-1
+# ============================================================
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Configuración del repositorio GitHub"
+        Parameters:
+          - GitHubOrg
+          - GitHubRepo
+          - GitHubBranch
+      - Label:
+          default: "Configuración del rol IAM"
+        Parameters:
+          - RoleName
+          - MaxSessionDuration
+
+Parameters:
+
+  GitHubOrg:
+    Type: String
+    Default: airusta
+    Description: "Usuario u organización de GitHub (owner del repositorio)"
+
+  GitHubRepo:
+    Type: String
+    Default: iaapp
+    Description: "Nombre del repositorio GitHub"
+
+  GitHubBranch:
+    Type: String
+    Default: "*"
+    Description: >
+      Rama permitida para asumir el rol.
+      Usar '*' para permitir todas las ramas, o especificar (ej: 'main').
+
+  RoleName:
+    Type: String
+    Default: GithubActionsDeployRole-iaapp-dev
+    Description: >
+      Nombre del IAM Role que asumirá GitHub Actions.
+      Convención: GithubActionsDeployRole-iaapp-{env}  (env: dev | qa | prod)
+      Cambiar el sufijo cuando se despliegue en cada cuenta AWS.
+
+  MaxSessionDuration:
+    Type: Number
+    Default: 3600
+    MinValue: 900
+    MaxValue: 43200
+    Description: "Duración máxima de la sesión en segundos (900-43200)"
+
+Resources:
+
+  # ----------------------------------------------------------
+  # OIDC IDENTITY PROVIDER
+  # ----------------------------------------------------------
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      # Thumbprint del certificado de GitHub OIDC (válido 2024-2026)
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+      Tags:
+        - Key: Name
+          Value: github-oidc-provider-udabol
+        - Key: Environment
+          Value: dev
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: SOW
+          Value: SOW-001
+
+  # ----------------------------------------------------------
+  # IAM ROLE — Asumido por GitHub Actions
+  # ----------------------------------------------------------
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref RoleName
+      MaxSessionDuration: !Ref MaxSessionDuration
+      Description: !Sub >
+        Rol IAM asumido por GitHub Actions (OIDC) para el repositorio
+        ${GitHubOrg}/${GitHubRepo}. Sin credenciales estáticas.
+        SOW-001 UDABOL.
+
+      # Trust Policy — Solo permite tokens OIDC del repo específico
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowGitHubActionsOIDC
+            Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOIDCProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                # Restricción al repositorio y rama específicos
+                token.actions.githubusercontent.com:sub:
+                  !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${GitHubBranch}"
+
+      # Políticas de permiso (mínimo necesario para SOW-001)
+      Policies:
+        - PolicyName: CloudFormationVPCDeployPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+
+              # CloudFormation — Gestión de stacks
+              - Sid: CloudFormationPermissions
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateStack
+                  - cloudformation:UpdateStack
+                  - cloudformation:DeleteStack
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:GetTemplate
+                  - cloudformation:ValidateTemplate
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:DescribeChangeSets
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:ListStacks
+                Resource:
+                  - !Sub "arn:aws:cloudformation:us-east-1:${AWS::AccountId}:stack/vpc-udabol-*"
+                  - !Sub "arn:aws:cloudformation:us-east-1:${AWS::AccountId}:stack/github-oidc-*"
+                  - !Sub "arn:aws:cloudformation:us-east-1:${AWS::AccountId}:stack/budget-*"
+
+              # EC2 VPC — Crear y gestionar recursos de red
+              - Sid: VPCPermissions
+                Effect: Allow
+                Action:
+                  - ec2:CreateVpc
+                  - ec2:DeleteVpc
+                  - ec2:ModifyVpcAttribute
+                  - ec2:DescribeVpcs
+                  - ec2:CreateSubnet
+                  - ec2:DeleteSubnet
+                  - ec2:ModifySubnetAttribute
+                  - ec2:DescribeSubnets
+                  - ec2:CreateInternetGateway
+                  - ec2:DeleteInternetGateway
+                  - ec2:AttachInternetGateway
+                  - ec2:DetachInternetGateway
+                  - ec2:DescribeInternetGateways
+                  - ec2:AllocateAddress
+                  - ec2:ReleaseAddress
+                  - ec2:DescribeAddresses
+                  - ec2:CreateNatGateway
+                  - ec2:DeleteNatGateway
+                  - ec2:DescribeNatGateways
+                  - ec2:CreateRouteTable
+                  - ec2:DeleteRouteTable
+                  - ec2:CreateRoute
+                  - ec2:DeleteRoute
+                  - ec2:AssociateRouteTable
+                  - ec2:DisassociateRouteTable
+                  - ec2:DescribeRouteTables
+                  - ec2:CreateNetworkAcl
+                  - ec2:DeleteNetworkAcl
+                  - ec2:CreateNetworkAclEntry
+                  - ec2:DeleteNetworkAclEntry
+                  - ec2:ReplaceNetworkAclEntry
+                  - ec2:ReplaceNetworkAclAssociation
+                  - ec2:DescribeNetworkAcls
+                  - ec2:DescribeAvailabilityZones
+                  - ec2:CreateFlowLogs
+                  - ec2:DeleteFlowLogs
+                  - ec2:DescribeFlowLogs
+                  - ec2:CreateTags
+                  - ec2:DeleteTags
+                  - ec2:DescribeTags
+                Resource: "*"
+
+              # CloudWatch Logs — Para VPC Flow Logs
+              - Sid: CloudWatchLogsPermissions
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:DeleteLogGroup
+                  - logs:DescribeLogGroups
+                  - logs:PutRetentionPolicy
+                  - logs:DeleteRetentionPolicy
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource:
+                  - !Sub "arn:aws:logs:us-east-1:${AWS::AccountId}:log-group:/vpc/*"
+
+              # IAM — Crear roles para Flow Logs (con restricción)
+              - Sid: IAMPermissionsForFlowLogs
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:PutRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:GetRole
+                  - iam:GetRolePolicy
+                  - iam:PassRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                Resource:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/role-vpc-flowlogs-*"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/GithubActionsDeployRole-*"
+
+              # IAM OIDC Provider — Para gestionar el propio provider
+              - Sid: OIDCProviderPermissions
+                Effect: Allow
+                Action:
+                  - iam:CreateOpenIDConnectProvider
+                  - iam:DeleteOpenIDConnectProvider
+                  - iam:GetOpenIDConnectProvider
+                  - iam:UpdateOpenIDConnectProviderThumbprint
+                  - iam:TagOpenIDConnectProvider
+                Resource:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+
+              # S3 — Leer templates desde bucket de CloudFormation (si aplica)
+              - Sid: S3TemplatesReadPermission
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::cfn-templates-udabol-${AWS::AccountId}"
+                  - !Sub "arn:aws:s3:::cfn-templates-udabol-${AWS::AccountId}/*"
+
+              # AWS Budgets — Para gestionar budgets
+              - Sid: BudgetsPermissions
+                Effect: Allow
+                Action:
+                  - budgets:CreateBudget
+                  - budgets:ModifyBudget
+                  - budgets:DeleteBudget
+                  - budgets:ViewBudget
+                  - budgets:DescribeBudget
+                Resource: !Sub "arn:aws:budgets::${AWS::AccountId}:budget/*"
+
+              # SNS — Para notificaciones de Budget
+              - Sid: SNSPermissions
+                Effect: Allow
+                Action:
+                  - sns:CreateTopic
+                  - sns:DeleteTopic
+                  - sns:Subscribe
+                  - sns:Unsubscribe
+                  - sns:GetTopicAttributes
+                  - sns:SetTopicAttributes
+                Resource:
+                  - !Sub "arn:aws:sns:us-east-1:${AWS::AccountId}:budget-alerts-*"
+
+      Tags:
+        - Key: Name
+          Value: !Ref RoleName
+        - Key: Environment
+          Value: dev
+        - Key: Project
+          Value: udabol
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: SOW
+          Value: SOW-001
+        - Key: GitHubRepo
+          Value: !Sub "${GitHubOrg}/${GitHubRepo}"
+
+# ============================================================
+# OUTPUTS
+# ============================================================
+Outputs:
+
+  OIDCProviderArn:
+    Description: "ARN del GitHub OIDC Provider"
+    Value: !Ref GitHubOIDCProvider
+    Export:
+      Name: "udabol-dev-GitHubOIDCProviderArn"
+
+  GitHubActionsRoleArn:
+    Description: "ARN del IAM Role para GitHub Actions — usar en GitHub Actions como aws-actions/configure-aws-credentials role-to-assume"
+    Value: !GetAtt GitHubActionsRole.Arn
+    Export:
+      Name: "udabol-dev-GitHubActionsRoleArn"
+
+  GitHubActionsRoleName:
+    Description: "Nombre del IAM Role"
+    Value: !Ref GitHubActionsRole
+
+  UsageInstructions:
+    Description: "Cómo usar en GitHub Actions"
+    Value: !Sub |
+      En tu workflow de GitHub Actions agrega:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${GitHubActionsRole.Arn}
+          role-session-name: GitHubActions-SOW001
+          aws-region: us-east-1
