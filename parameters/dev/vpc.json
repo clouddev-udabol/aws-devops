@@ -1,0 +1,17 @@
+[
+  { "ParameterKey": "Environment",            "ParameterValue": "dev" },
+  { "ParameterKey": "ProjectName",            "ParameterValue": "iaapp" },
+  { "ParameterKey": "VpcCidr",                "ParameterValue": "10.10.0.0/16" },
+  { "ParameterKey": "MultiAZ",                "ParameterValue": "false" },
+  { "ParameterKey": "PublicSubnetACidr",      "ParameterValue": "10.10.1.0/24" },
+  { "ParameterKey": "PublicSubnetBCidr",      "ParameterValue": "10.10.2.0/24" },
+  { "ParameterKey": "AppSubnetACidr",         "ParameterValue": "10.10.11.0/24" },
+  { "ParameterKey": "AppSubnetBCidr",         "ParameterValue": "10.10.12.0/24" },
+  { "ParameterKey": "DataSubnetACidr",        "ParameterValue": "10.10.21.0/24" },
+  { "ParameterKey": "DataSubnetBCidr",        "ParameterValue": "10.10.22.0/24" },
+  { "ParameterKey": "AvailabilityZoneA",      "ParameterValue": "us-east-1a" },
+  { "ParameterKey": "AvailabilityZoneB",      "ParameterValue": "us-east-1b" },
+  { "ParameterKey": "EnableNatGateway",       "ParameterValue": "false" },
+  { "ParameterKey": "EnableFlowLogs",         "ParameterValue": "true" },
+  { "ParameterKey": "FlowLogsRetentionDays",  "ParameterValue": "30" }
+]
