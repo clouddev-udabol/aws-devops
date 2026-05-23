@@ -1,0 +1,8 @@
+[
+  { "ParameterKey": "Environment",         "ParameterValue": "prod" },
+  { "ParameterKey": "ProjectName",         "ParameterValue": "iaapp" },
+  { "ParameterKey": "MonthlyBudgetLimit",  "ParameterValue": "500" },
+  { "ParameterKey": "AlertEmail",          "ParameterValue": "ayrton.irusta@gmail.com" },
+  { "ParameterKey": "AlertThreshold80",    "ParameterValue": "80" },
+  { "ParameterKey": "AlertThreshold100",   "ParameterValue": "100" }
+]
