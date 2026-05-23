@@ -9,6 +9,12 @@
 #   DEV: 245650696072
 #   QA:  493735739951
 #
+# Notas:
+#   - proy-app-gha-role-development y proy-app-gha-role-qa requieren
+#     inline policy IAMForVPCFlowLogs (iam:GetRole/CreateRole/DeleteRole/...)
+#     scoped a arn:aws:iam::<account>:role/role-vpc-flowlogs-*
+#     Aplicada el 2026-05-22. Ver docs/convenios-iac.md §2.
+#
 # IDs de proceso:
 #   [CD-INI-101] Checkout
 #   [CD-SET-102] OIDC + caller identity
