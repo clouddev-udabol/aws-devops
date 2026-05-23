@@ -1,0 +1,5 @@
+[
+  { "ParameterKey": "Entorno",           "ParameterValue": "desarrollo" },
+  { "ParameterKey": "LifecycleMaxImages","ParameterValue": "5" },
+  { "ParameterKey": "UntaggedExpiryDays","ParameterValue": "1" }
+]
