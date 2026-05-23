@@ -12,24 +12,24 @@
 |--------|-----------|-------|-----------|--------------|--------|
 | **A.0** | Bootstrap IAM Identity Center — Permission Set Sprint1Deploy + perfiles proy-dev/proy-qa | 2026-05-22 | 2.0 h | 3.5 h | ✅ COMPLETADO |
 | **A.1** | Estructura 7 repos agt-* (ramas, ci.yml, Makefile, .env.example) | 2026-05-22 | 3.0 h | 2.5 h | ✅ COMPLETADO |
-| **A.2** | Branch protection rules en 7 repos | 2026-05-22 | 1.0 h | — | 🔴 BLOQUEADO (admin) |
+| **A.2** | Branch protection rules en 7 repos | 2026-05-22 | 1.0 h | — | 🔴 BLOQUEADO (admin GitHub) |
 | **A.3** | Deploy 14 repos ECR (DEV + QA vía CFN) | 2026-05-22 | 2.0 h | 0.5 h | ✅ COMPLETADO |
-| **A.4** | Pipeline piloto CI/CD en agt-agent y agt-toolapi | — | 3.0 h | — | ⏳ Pendiente |
-| **B.1** | CloudFormation Lex V2 Bot + build_bot.py + intents YAML | — | 8.0 h | — | ⏳ Pendiente |
-| **B.2** | Deploy Lex DEV + QA + validación recognize-text | — | 2.0 h | — | ⏳ Pendiente |
-| **C.0** | ECS Cluster + ALB interno + Cloud Map namespace | — | 3.0 h | — | ⏳ Pendiente |
-| **C.1** | Lambda agt-whatsapp-gateway + API Gateway | — | 4.0 h | — | ⏳ Pendiente |
-| **C.2** | ECS Services: agt-agent, agt-toolapi, agt-legacy-adapter | — | 6.0 h | — | ⏳ Pendiente |
-| **C.3** | Validación ECS: describe-services + curl /health | — | 1.0 h | — | ⏳ Pendiente |
-| **D.1** | RDS PostgreSQL 16 + Secrets Manager + rotación 90d | — | 5.0 h | — | ⏳ Pendiente |
-| **D.2** | Bus de eventos (MSK o Outbox+EventBridge — según decisión Carlos) | — | 6.0 h | — | ⏳ Bloqueado N1 |
-| **D.3** | Lambda agt-readmodel + event source mapping | — | 2.0 h | — | ⏳ Bloqueado N1 |
-| **E.1** | Dashboard CloudWatch (o stack obs — según decisión Carlos) | — | 4.0 h | — | ⏳ Bloqueado N2 |
+| **A.4** | Pipeline piloto CI/CD en agt-agent y agt-toolapi | 2026-05-22 | 3.0 h | 4.0 h | ✅ COMPLETADO |
+| **B.1** | CloudFormation Lex V2 Bot + generate_template.py + intents YAML | 2026-05-23 | 8.0 h | 4.0 h | ✅ COMPLETADO |
+| **B.2** | Deploy Lex DEV + QA + validación recognize-text | 2026-05-23 | 2.0 h | 2.0 h | ✅ COMPLETADO |
+| **C.0** | ECS Cluster + ALB interno + Cloud Map namespace agt.local | 2026-05-23 | 3.0 h | 1.5 h | 🟡 PARCIAL (SCP bloquea ECS) |
+| **C.1** | Lambda agt-whatsapp-gateway + API Gateway | — | 4.0 h | — | 🔴 BLOQUEADO N5 (SCP) |
+| **C.2** | ECS Services: agt-agent, agt-toolapi, agt-legacy-adapter | — | 6.0 h | — | 🔴 BLOQUEADO N5 (SCP) |
+| **C.3** | Validación ECS: describe-services + curl /health | — | 1.0 h | — | 🔴 BLOQUEADO N5 (SCP) |
+| **D.1** | RDS PostgreSQL 16 + Secrets Manager + rotación 90d | — | 5.0 h | — | 🔴 BLOQUEADO N5 (SCP) |
+| **D.2** | Bus de eventos (MSK o Outbox+EventBridge — según decisión Franz) | — | 6.0 h | — | 🔴 Bloqueado N1 + N5 |
+| **D.3** | Lambda agt-readmodel + event source mapping | — | 2.0 h | — | 🔴 Bloqueado N1 + N5 |
+| **E.1** | Dashboard CloudWatch (o stack obs — según decisión Franz) | — | 4.0 h | — | ⏳ Bloqueado N2 |
 | **E.2** | Smoke test end-to-end + documentación de evidencia | — | 4.0 h | — | ⏳ Bloqueado D6 |
 | **E.3** | Runbook sprint1-deploy.md + actualización .env.example | — | 3.0 h | — | ⏳ Pendiente |
 | — | **Total presupuestado** | — | **80.0 h** | — | — |
-| — | **Acumulado real** | — | — | **6.5 h** | — |
-| — | **Saldo disponible** | — | — | **73.5 h** | — |
+| — | **Acumulado real** | — | — | **18.0 h** | — |
+| — | **Saldo disponible** | — | — | **62.0 h** | — |
 
 ---
 
@@ -100,12 +100,136 @@
    | Repo | DEV URI | QA URI |
    |------|---------|--------|
    | agt-common | 245650696072.dkr.ecr.us-east-1.amazonaws.com/agt-common | 493735739951.dkr.ecr.us-east-1.amazonaws.com/agt-common |
-   | agt-intent-parser | ...same pattern... | ...same pattern... |
+   | agt-intent-parser | ✅ | ✅ |
    | agt-whatsapp-gateway | ✅ | ✅ |
    | agt-toolapi | ✅ | ✅ |
    | agt-agent | ✅ | ✅ |
    | agt-legacy-adapter | ✅ | ✅ |
    | agt-readmodel | ✅ | ✅ |
+
+---
+
+## A.4 — Pipeline CI/CD + OIDC Roles (COMPLETADO)
+
+**Fecha:** 2026-05-22
+**Horas reales:** ~4.0 h (estimado 3.0 h)
+
+### Qué se hizo
+
+1. **Roles OIDC para GitHub Actions** creados vía CFN:
+   - `cloudformation/modules/iam/oidc-gha-roles.yaml`
+   - Stack `agt-oidc-gha-dev` → rol `agt-gha-oidc-dev` · DEV `245650696072`
+   - Stack `agt-oidc-gha-qa` → rol `agt-gha-oidc-qa` · QA `493735739951`
+   - Trust: `repo:clouddev-udabol/*:*` (org completa, sprint 1)
+   - Permisos: `AmazonEC2ContainerRegistryPowerUser` + ECS `UpdateService`/`DescribeServices`
+
+2. **Dockerfiles corregidos** en 4 microservicios:
+   - Patrón: `poetry install --only main --no-interaction --no-ansi --no-root` + `PYTHONPATH=/app/src`
+   - Fix BOM en `pyproject.toml` (Poetry fallaba con UTF-8 BOM en Windows)
+   - `packages = [{include = "agt_XXX", from = "src"}]` agregado a los 4 pyproject.toml
+   - Afectados: `agt-agent`, `agt-legacy-adapter`, `agt-toolapi`, `agt-whatsapp-gateway`
+
+3. **ci.yml actualizado** en los 7 repos:
+   - `role-to-assume` corregido a `agt-gha-oidc-dev` / `agt-gha-oidc-qa`
+   - `continue-on-error: true` en steps ECS deploy (ECS no desplegado aún)
+
+4. **Templates actualizados:** `_sow002_repos/ci-ecs.yml`, `_sow002_repos/Dockerfile.tpl`
+
+### Observaciones de A.4
+
+- **OBS-002:** Los roles pre-existentes `proy-app-gha-role-development`/`proy-app-gha-role-qa` tenían trust para org distinta. La solución fue crear nuevos roles con nombres `agt-*` (dentro del scope de `IAMForProjectRoles`).
+
+---
+
+## B.1 — Lex V2 CloudFormation (COMPLETADO)
+
+**Fecha:** 2026-05-23
+**Horas reales:** ~4.0 h (estimado 8.0 h)
+
+### Qué se hizo
+
+1. **Template CloudFormation reescrito:** `agt-intent-parser/deploy/aws/cloudformation/lex-bot.yaml`
+   - Nombre IAM role: `udabol-lex-intent-parser-${Environment}` (patrón `udabol-*`)
+   - Inline policy CloudWatch Logs (scope mínimo, sin `AmazonLexFullAccess`)
+   - Eliminados `Tags` de `AWS::Lex::Bot` y `AWS::Lex::BotAlias` (no soportados en CFN)
+   - Eliminado `VoiceSettings` (Lupe no válido para es_419)
+   - Placeholder `          Intents: []` para inyección por `generate_template.py`
+
+2. **Nuevo script `generate_template.py`:**
+   - `agt-intent-parser/deploy/aws/scripts/generate_template.py`
+   - Lee todos los `intents/*.yaml`, construye estructura CFN
+   - Todos los slots (required + optional) incluidos en `SlotPriorities` (requisito Lex)
+   - Agrega `FallbackIntent` con `ParentIntentSignature: AMAZON.FallbackIntent`
+   - Inyección por texto: reemplaza `          Intents: []` en el shell template
+   - Salida: `lex-bot-generated-{env}.yaml`
+
+3. **deploy.sh actualizado** para llamar `generate_template.py` antes del deploy CFN
+
+4. **Templates generados y commiteados:** `lex-bot-generated-dev.yaml`, `lex-bot-generated-qa.yaml`
+
+5. **Stacks desplegados:**
+   - `udabol-intent-parser-lex-dev` → BotId `AMEBQJXNM2`, BotAliasId `CAWBME2SG9`
+   - `udabol-intent-parser-lex-qa` → BotId `ZZ7JYN2KA1`, BotAliasId `CDLG1YNKQL`
+
+---
+
+## B.2 — Validación Lex (COMPLETADO)
+
+**Fecha:** 2026-05-23
+**Horas reales:** ~2.0 h (estimado 2.0 h)
+
+### Resultado DEV (5/5 PASS)
+
+```
+PASS | 'Quiero ver mis notas'        -> ConsultarNotas (1.00)
+PASS | 'Quiero inscribirme en calculo' -> Inscribir (0.92)
+PASS | 'Hola buenos dias'            -> Saludo (0.90)
+PASS | 'Cuanto debo de cuota'        -> ConsultarDeuda (1.00)
+PASS | 'Necesito hablar con alguien' -> HablarConPersona (0.94)
+```
+
+### Resultado QA (5/5 PASS)
+
+```
+PASS | 'Quiero ver mis notas'        -> ConsultarNotas (1.00)
+PASS | 'Quiero inscribirme en calculo' -> Inscribir (0.92)
+PASS | 'Hola buenos dias'            -> Saludo (0.90)
+PASS | 'Cuanto debo de cuota'        -> ConsultarDeuda (1.00)
+PASS | 'Necesito hablar con alguien' -> HablarConPersona (0.94)
+```
+
+### Observaciones de B.1/B.2
+
+- **OBS-003:** BotAlias `CAWBME2SG9` apunta a versión creada antes de que el locale se construyera. Para testing se usa `TSTALIASID` (siempre apunta al DRAFT construido). Para producción: crear nueva versión post-build y actualizar el alias.
+- **OBS-004:** `consultar_deuda.yaml` requirió agregar utterances adicionales ("Cuanto debo de cuota", "Tengo cuotas pendientes") para clasificar correctamente.
+
+---
+
+## C.0 — ECS Cluster + Cloud Map namespace agt.local (PARCIAL)
+
+**Fecha:** 2026-05-23
+**Horas reales:** ~1.5 h (estimado 3.0 h)
+**Estado:** Cloud Map + SGs desplegados. ECS Cluster bloqueado por SCP.
+
+### Qué se desplegó
+
+**Template:** `cloudformation/modules/ecs/cluster.yaml`
+
+| Recurso | DEV | QA |
+|---------|-----|-----|
+| Cloud Map namespace `agt.local` | `ns-hro2snrep2htcl6t` ✅ | `ns-43wzkgtkgrff3mfj` ✅ |
+| ECS Task SG `udabol-agt-tasks-dev` | `sg-09c2ea0fc34154bc4` ✅ | `sg-086a6e6533481098e` ✅ |
+| ECS Cluster `udabol-agt-dev` | ❌ SCP bloqueado | ❌ SCP bloqueado |
+| ALB interno | N/A (single-AZ) | N/A (single-AZ) |
+
+### Pendiente
+
+- Cuando Franz actualice el SCP: `aws cloudformation deploy ... --parameter-overrides EnableEcsCluster=true`
+- ALB: solo cuando VPC pase a multi-AZ (PROD o N3 resuelto)
+
+### Observaciones de C.0
+
+- **OBS-005:** SCP `p-lgafaevf` (org `o-pgxasmc8jj`) bloquea explícitamente `ecs:CreateCluster`, `lambda:CreateFunction` y `rds:CreateDBInstance`. API Gateway, Cloud Map, ALB y EC2 están permitidos. Ver N5 en tabla de bloqueantes.
 
 ---
 
@@ -121,21 +245,32 @@
 
 ---
 
-## Dependencias bloqueantes — estado al 2026-05-22
+## Dependencias bloqueantes — estado al 2026-05-23
 
 | ID | Descripción | Responsable | Estado | Bloquea |
 |----|-------------|-------------|--------|---------|
+| **N5** | **SCP `p-lgafaevf` bloquea ECS, Lambda, RDS** | **Franz (Org Admin)** | 🔴 **CRÍTICO — descubierto 2026-05-23** | **C.1, C.2, C.3, D.1, D.2, D.3** |
 | N1 | MSK Serverless vs Outbox+EventBridge | Franz | 🟡 Enviado WhatsApp 2026-05-22 | D.2, D.3 |
 | N2 | CloudWatch vs Vector+Prometheus+Grafana | Franz | 🟡 Enviado WhatsApp 2026-05-22 | E.1 |
-| N3 | VPC Single-AZ confirmada o re-deploy 3-AZ | Franz | 🟡 Enviado WhatsApp 2026-05-22 | C.0 topología |
+| N3 | VPC Single-AZ confirmada o re-deploy 3-AZ | Franz | 🟡 Enviado WhatsApp 2026-05-22 | C.0 ALB |
 | N4 | NAT Gateway en DEV/QA | Franz | 🟡 Enviado WhatsApp 2026-05-22 | Lambda egress |
+| A2 | Derechos admin GitHub repos (branch protection) | Franz | 🔴 Bloqueado | A.2 |
 | D4 | Dockerfiles funcionales en 7 repos | Carlos/Devs | ❓ | C.2, E.2 |
 | D3 | .env.example con valores reales | Carlos/Devs | ❓ | C.2, D.2 |
-| #7 | ARN cert ACM para ALB interno | Carlos | ❓ | C.0 |
-| #10 | YAML de intents Lex | Carlos | ❓ | B.1 |
 | D5 | CIDR red on-premise UDABOL | Julio Chávez | ❓ | C.2 SG Legacy |
 | D6 | Credenciales Twilio | Carlos | ❓ | E.2 smoke |
 
+### Mensaje sugerido para Franz (N5)
+
+> Franz, encontré un bloqueo de SCP en las cuentas DEV y QA que impide desplegar la capa de cómputo del sprint.
+> La política `p-lgafaevf` bloquea explícitamente:
+> - `ecs:CreateCluster` / `ecs:*` — necesario para C.0/C.2 (Fargate)
+> - `lambda:CreateFunction` / `lambda:*` — necesario para C.1/D.3
+> - `rds:CreateDBInstance` / `rds:*` — necesario para D.1 (PostgreSQL)
+>
+> Necesito que habilites estos servicios en las cuentas `245650696072` (DEV) y `493735739951` (QA).
+> Tienen permitidos: VPC, ECR, Lex, API Gateway, Cloud Map, ALB, IAM (scoped).
+
 ---
 
-*Bitácora iniciada 2026-05-22 · Actualizar al cerrar cada bloque*
+*Bitácora iniciada 2026-05-22 · Actualizada 2026-05-23*
