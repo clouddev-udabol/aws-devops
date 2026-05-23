@@ -47,10 +47,10 @@ jobs:
     steps:
 
       - name: '[OPS-INI-001] Checkout'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: '[OPS-SET-002] Configure AWS via OIDC'
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::${{ matrix.account }}:role/GithubActionsDeployRole-iaapp-${{ matrix.environment }}
           role-session-name: drift-${{ matrix.environment }}-${{ github.run_id }}
@@ -113,7 +113,7 @@ jobs:
 
       - name: '[OPS-FIN-005] Create issue on drift'
         if: steps.drift.outputs.drifted != ''
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const drifted = '${{ steps.drift.outputs.drifted }}'.trim();
