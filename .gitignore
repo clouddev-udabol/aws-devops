@@ -1,5 +1,5 @@
-# ============================================================
-# iaapp — UDABOL — .gitignore
+﻿# ============================================================
+# iaapp â€” UDABOL â€” .gitignore
 # ============================================================
 
 # CloudFormation packaging
@@ -11,7 +11,7 @@ packaged-*.json
 .aws-sam/
 samconfig.toml
 
-# AWS CLI / credenciales locales (defensiva — nunca deberían aparecer)
+# AWS CLI / credenciales locales (defensiva â€” nunca deberÃ­an aparecer)
 .aws/
 *.pem
 *.key
@@ -27,9 +27,13 @@ config
 # Editores / IDE
 .vscode/
 .idea/
+.obsidian/
 *.swp
 *.swo
 *~
+
+# Claude Code local config
+.claude/
 
 # Sistema operativo
 .DS_Store
@@ -45,7 +49,7 @@ __pycache__/
 venv/
 .venv/
 
-# Node (si se agregan validators JS más adelante)
+# Node (si se agregan validators JS mÃ¡s adelante)
 node_modules/
 npm-debug.log*
 
@@ -65,5 +69,5 @@ memoria.md
 *.drawio.bkp
 ~$*
 
-# Archivos pesados de documentación binaria que no deben versionarse en root
+# Archivos pesados de documentaciÃ³n binaria que no deben versionarse en root
 *.tmp

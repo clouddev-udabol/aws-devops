@@ -1,0 +1,240 @@
+# ============================================================
+# iaapp — UDABOL — [CD] Deploy a PRODUCCIÓN
+#
+# Trigger: SOLO workflow_dispatch (manual)
+# Aprobación: GitHub Environment 'production' fuerza:
+#   - 2 reviewers (autor no puede auto-aprobar)
+#   - 10 minutos de wait timer
+#   - Branch restriction: solo main
+#
+# IDs de proceso:
+#   [PRD-INI-101]  Checkout
+#   [PRD-GATE-102] Mostrar contexto antes de la aprobación
+#   [PRD-SET-103]  OIDC con rol de prod
+#   [PRD-IAC-104]  ChangeSet creation (no execute)
+#   [PRD-IAC-105]  Print ChangeSet para auditoría
+#   [PRD-DEP-106]  Execute ChangeSet (deploy real)
+#   [PRD-OPS-107]  Smoke tests + outputs
+#   [PRD-FIN-108]  Notificación
+# ============================================================
+
+name: deploy-prod
+
+'on':
+  workflow_dispatch:
+    inputs:
+      stack:
+        description: Stack a desplegar a producción
+        required: true
+        type: choice
+        options:
+          - vpc
+          - budgets
+        default: vpc
+      confirm:
+        description: Escribe IAAPP-PROD para confirmar
+        required: true
+        type: string
+      ticket:
+        description: Ticket / motivo del cambio (ej. JIRA-123)
+        required: true
+        type: string
+
+# Solo un deploy a prod a la vez
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT: iaapp
+  COMPANY: udabol
+  # PROD account ID — actualizar cuando se aprovisione la cuenta de producción
+  PROD_ACCOUNT_ID: '000000000000' # ⚠️ ACTUALIZAR antes del primer deploy a prod
+
+jobs:
+
+  # ----------------------------------------------------------
+  # JOB 1 — Validar input antes de pedir aprobación
+  # ----------------------------------------------------------
+  validate-input:
+    name: '[PRD] Validate input'
+    runs-on: ubuntu-latest
+    steps:
+      - name: '[PRD-GATE-001] Verify confirmation string'
+        run: |
+          if [ "${{ inputs.confirm }}" != "IAAPP-PROD" ]; then
+            echo "::error::Confirmación incorrecta. Debes escribir exactamente: IAAPP-PROD"
+            exit 1
+          fi
+          echo "::notice::Confirmación válida — esperando aprobación de 2 reviewers + 10 min wait timer"
+
+      - name: '[PRD-GATE-002] Verify ticket format'
+        run: |
+          if [[ ! "${{ inputs.ticket }}" =~ ^[A-Z]+-[0-9]+$ ]] && [[ ! "${{ inputs.ticket }}" =~ ^GH-[0-9]+$ ]]; then
+            echo "::warning::Formato de ticket inusual: ${{ inputs.ticket }} (esperado: JIRA-123 o GH-123)"
+          fi
+
+  # ----------------------------------------------------------
+  # JOB 2 — Deploy a producción
+  # NOTA: el environment 'production' fuerza la aprobación humana
+  # ----------------------------------------------------------
+  deploy:
+    name: '[PRD] Deploy ${{ inputs.stack }} a producción'
+    needs: validate-input
+    runs-on: ubuntu-latest
+    environment: production # ← aquí GitHub bloquea hasta que 2 reviewers aprueben
+    steps:
+
+      - name: '[PRD-INI-101] Checkout'
+        uses: actions/checkout@v4
+
+      - name: '[PRD-GATE-102] Pre-deploy context'
+        run: |
+          echo "================================================"
+          echo "  🚨 DEPLOY A PRODUCCIÓN — iaapp"
+          echo "================================================"
+          echo "  Stack:        ${{ inputs.stack }}"
+          echo "  Account:      ${{ env.PROD_ACCOUNT_ID }}"
+          echo "  Triggered by: ${{ github.actor }}"
+          echo "  Commit SHA:   ${{ github.sha }}"
+          echo "  Ticket:       ${{ inputs.ticket }}"
+          echo "  Run URL:      ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "================================================"
+
+      - name: '[PRD-SET-103] Configure AWS via OIDC (prod)'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.PROD_ACCOUNT_ID
+            }}:role/GithubActionsDeployRole-iaapp-prod
+          role-session-name: iaapp-prod-deploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: '[PRD-IAC-104] Verify caller identity'
+        run: |
+          IDENTITY=$(aws sts get-caller-identity --output json)
+          ACCOUNT=$(echo $IDENTITY | jq -r .Account)
+          echo "$IDENTITY"
+
+          if [ "$ACCOUNT" != "${{ env.PROD_ACCOUNT_ID }}" ]; then
+            echo "::error::Cuenta incorrecta. Se esperaba ${{ env.PROD_ACCOUNT_ID }}, se obtuvo $ACCOUNT"
+            exit 1
+          fi
+
+      - name: '[PRD-IAC-105] Create ChangeSet (no execute)'
+        id: changeset
+        env:
+          STACK: ${{ inputs.stack }}
+        run: |
+          STACK_NAME=${{ env.PROJECT }}-${STACK}-prod
+          CHANGESET_NAME=prod-${{ github.run_id }}
+
+          # Determina si es CREATE o UPDATE
+          if aws cloudformation describe-stacks --stack-name ${STACK_NAME} --region ${{ env.AWS_REGION }} 2>/dev/null; then
+            CHANGESET_TYPE=UPDATE
+          else
+            CHANGESET_TYPE=CREATE
+          fi
+
+          echo "ChangeSet type: ${CHANGESET_TYPE}"
+          echo "stack_name=${STACK_NAME}" >> $GITHUB_OUTPUT
+          echo "changeset_name=${CHANGESET_NAME}" >> $GITHUB_OUTPUT
+          echo "changeset_type=${CHANGESET_TYPE}" >> $GITHUB_OUTPUT
+
+          aws cloudformation create-change-set \
+            --stack-name ${STACK_NAME} \
+            --change-set-name ${CHANGESET_NAME} \
+            --change-set-type ${CHANGESET_TYPE} \
+            --template-body file://cloudformation/modules/${STACK}/${STACK}.yaml \
+            --parameters file://parameters/prod/${STACK}.json \
+            --tags \
+              Key=Project,Value=${{ env.PROJECT }} \
+              Key=Company,Value=${{ env.COMPANY }} \
+              Key=Environment,Value=prod \
+              Key=Owner,Value=ayrton.irusta@gmail.com \
+              Key=ManagedBy,Value=cloudformation \
+              Key=SOW,Value=SOW-001 \
+              Key=Pipeline,Value=github-actions \
+              Key=CommitHash,Value=${GITHUB_SHA::7} \
+              Key=DeployDate,Value=$(date -u +%Y-%m-%d) \
+              Key=TicketId,Value=${{ inputs.ticket }} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region ${{ env.AWS_REGION }}
+
+          # Esperar a que el ChangeSet termine de calcularse
+          aws cloudformation wait change-set-create-complete \
+            --stack-name ${STACK_NAME} \
+            --change-set-name ${CHANGESET_NAME} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: '[PRD-IAC-106] Print ChangeSet for audit'
+        run: |
+          echo "::group::ChangeSet — ${{ steps.changeset.outputs.stack_name }}"
+          aws cloudformation describe-change-set \
+            --stack-name ${{ steps.changeset.outputs.stack_name }} \
+            --change-set-name ${{ steps.changeset.outputs.changeset_name }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Changes[*].[ResourceChange.Action,ResourceChange.ResourceType,ResourceChange.LogicalResourceId,ResourceChange.Replacement]' \
+            --output table
+          echo "::endgroup::"
+
+      - name: '[PRD-DEP-107] Execute ChangeSet'
+        run: |
+          aws cloudformation execute-change-set \
+            --stack-name ${{ steps.changeset.outputs.stack_name }} \
+            --change-set-name ${{ steps.changeset.outputs.changeset_name }} \
+            --region ${{ env.AWS_REGION }}
+
+          echo "Esperando a que termine el deploy..."
+          if [ "${{ steps.changeset.outputs.changeset_type }}" = "CREATE" ]; then
+            aws cloudformation wait stack-create-complete \
+              --stack-name ${{ steps.changeset.outputs.stack_name }} \
+              --region ${{ env.AWS_REGION }}
+          else
+            aws cloudformation wait stack-update-complete \
+              --stack-name ${{ steps.changeset.outputs.stack_name }} \
+              --region ${{ env.AWS_REGION }}
+          fi
+
+          echo "✓ Deploy completado"
+
+      - name: '[PRD-OPS-108] Print stack outputs'
+        if: success()
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name ${{ steps.changeset.outputs.stack_name }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Stacks[0].Outputs[*].[OutputKey,OutputValue]' \
+            --output table
+
+      - name: '[PRD-OPS-109] Smoke test'
+        if: success()
+        run: |
+          # Smoke test específico por stack
+          if [ "${{ inputs.stack }}" = "vpc" ]; then
+            VPC_ID=$(aws cloudformation describe-stacks \
+              --stack-name ${{ steps.changeset.outputs.stack_name }} \
+              --region ${{ env.AWS_REGION }} \
+              --query 'Stacks[0].Outputs[?OutputKey==`VpcId`].OutputValue' \
+              --output text)
+            aws ec2 describe-vpcs --vpc-ids ${VPC_ID} --region ${{ env.AWS_REGION }} > /dev/null
+            echo "✓ VPC accesible: ${VPC_ID}"
+          fi
+
+      - name: '[PRD-FIN-110] Final summary'
+        if: always()
+        run: |
+          echo "================================================"
+          echo "  🚀 iaapp — PROD DEPLOY"
+          echo "================================================"
+          echo "  Result:    ${{ job.status }}"
+          echo "  Stack:     ${{ steps.changeset.outputs.stack_name }}"
+          echo "  Operator:  ${{ github.actor }}"
+          echo "  Ticket:    ${{ inputs.ticket }}"
+          echo "  Commit:    ${{ github.sha }}"
+          echo "  Date:      $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "================================================"

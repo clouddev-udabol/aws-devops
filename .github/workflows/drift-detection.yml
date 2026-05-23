@@ -1,0 +1,137 @@
+# ============================================================
+# iaapp — UDABOL — [OPS] Drift Detection
+#
+# Trigger: schedule diario (07:00 UTC = 03:00 Bolivia)
+# Hace: detect-stack-drift en todos los stacks de iaapp.
+#       Si encuentra DRIFTED, abre un GitHub Issue.
+#
+# IDs de proceso:
+#   [OPS-INI-001]  Setup
+#   [OPS-IAC-002]  Iterate stacks por cuenta
+#   [OPS-IAC-003]  Detect drift
+#   [OPS-FIN-004]  Crear issue si DRIFTED
+# ============================================================
+
+name: drift-detection
+
+on:
+  schedule:
+    - cron: '0 7 * * *'   # diario a las 07:00 UTC
+  workflow_dispatch:       # también ejecutable manualmente
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write   # para abrir issues si se detecta drift
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT: iaapp
+
+jobs:
+
+  detect-drift:
+    name: '[OPS] Drift detection — ${{ matrix.environment }}'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - environment: dev
+            account: '245650696072'
+          - environment: qa
+            account: '493735739951'
+          # Cuando prod esté lista, descomentar:
+          # - environment: prod
+          #   account: '000000000000'
+    steps:
+
+      - name: '[OPS-INI-001] Checkout'
+        uses: actions/checkout@v4
+
+      - name: '[OPS-SET-002] Configure AWS via OIDC'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ matrix.account }}:role/GithubActionsDeployRole-iaapp-${{ matrix.environment }}
+          role-session-name: drift-${{ matrix.environment }}-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: '[OPS-IAC-003] List iaapp stacks'
+        id: list
+        run: |
+          STACKS=$(aws cloudformation list-stacks \
+            --region ${{ env.AWS_REGION }} \
+            --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+            --query 'StackSummaries[?starts_with(StackName, `${{ env.PROJECT }}-`) == `true`].StackName' \
+            --output text)
+          echo "stacks=${STACKS}" >> $GITHUB_OUTPUT
+          echo "Stacks encontrados:"
+          echo "${STACKS}" | tr '\t' '\n'
+
+      - name: '[OPS-IAC-004] Detect drift'
+        id: drift
+        run: |
+          DRIFTED_STACKS=""
+          for STACK in ${{ steps.list.outputs.stacks }}; do
+            echo "::group::Drift check — ${STACK}"
+            DETECTION_ID=$(aws cloudformation detect-stack-drift \
+              --stack-name ${STACK} \
+              --region ${{ env.AWS_REGION }} \
+              --query StackDriftDetectionId --output text)
+
+            # Esperar resultado
+            for i in {1..30}; do
+              STATUS=$(aws cloudformation describe-stack-drift-detection-status \
+                --stack-drift-detection-id ${DETECTION_ID} \
+                --region ${{ env.AWS_REGION }} \
+                --query DetectionStatus --output text)
+              if [ "${STATUS}" = "DETECTION_COMPLETE" ] || [ "${STATUS}" = "DETECTION_FAILED" ]; then
+                break
+              fi
+              sleep 5
+            done
+
+            DRIFT=$(aws cloudformation describe-stack-drift-detection-status \
+              --stack-drift-detection-id ${DETECTION_ID} \
+              --region ${{ env.AWS_REGION }} \
+              --query StackDriftStatus --output text)
+
+            echo "  Status: ${STATUS} / ${DRIFT}"
+
+            if [ "${DRIFT}" = "DRIFTED" ]; then
+              DRIFTED_STACKS="${DRIFTED_STACKS} ${STACK}"
+            fi
+            echo "::endgroup::"
+          done
+
+          if [ -n "${DRIFTED_STACKS}" ]; then
+            echo "drifted=${DRIFTED_STACKS}" >> $GITHUB_OUTPUT
+            echo "::warning::Stacks con drift detectado:${DRIFTED_STACKS}"
+          else
+            echo "::notice::Sin drift detectado en ${{ matrix.environment }}"
+          fi
+
+      - name: '[OPS-FIN-005] Create issue on drift'
+        if: steps.drift.outputs.drifted != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const drifted = '${{ steps.drift.outputs.drifted }}'.trim();
+            const env = '${{ matrix.environment }}';
+            const account = '${{ matrix.account }}';
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[DRIFT] ${env} — ${drifted}`,
+              body: `## Drift detectado en \`${env}\`\n\n` +
+                    `**Cuenta AWS:** ${account}\n` +
+                    `**Stacks afectados:**\n${drifted.split(' ').filter(Boolean).map(s => `- \`${s}\``).join('\n')}\n\n` +
+                    `**Acción requerida:**\n` +
+                    `1. Investigar la causa del drift en la consola de CloudFormation\n` +
+                    `2. Actualizar el template para reflejar el estado real, o\n` +
+                    `3. Aplicar un cambio que vuelva al estado del template\n\n` +
+                    `**Workflow run:** ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n` +
+                    `_Generado automáticamente por drift-detection.yml_`,
+              labels: ['drift', `env:${env}`, 'priority:high']
+            });
