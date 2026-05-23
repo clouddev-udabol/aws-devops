@@ -3,6 +3,7 @@
   { "ParameterKey": "ProjectName",         "ParameterValue": "iaapp" },
   { "ParameterKey": "MonthlyBudgetLimit",  "ParameterValue": "100" },
   { "ParameterKey": "AlertEmail",          "ParameterValue": "ayrton.irusta@gmail.com" },
+  { "ParameterKey": "AlertThreshold50",    "ParameterValue": "50" },
   { "ParameterKey": "AlertThreshold80",    "ParameterValue": "80" },
   { "ParameterKey": "AlertThreshold100",   "ParameterValue": "100" }
 ]
