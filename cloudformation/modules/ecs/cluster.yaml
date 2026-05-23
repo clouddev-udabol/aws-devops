@@ -1,0 +1,236 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: |
+  UDABOL ERP-Agent - C.0 - ECS Fargate Cluster + Cloud Map namespace agt.local.
+  Internal ALB is created only when AppSubnetB is supplied (multi-AZ/PROD).
+  ECS Cluster is created only when EnableEcsCluster=true (blocked by SCP until Franz enables ECS).
+  Single-AZ environments (DEV/QA) use Cloud Map service discovery exclusively.
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, qa, prod]
+
+  Entorno:
+    Type: String
+    AllowedValues: [desarrollo, staging, produccion]
+    Description: "SCP tag value"
+
+  VpcStackName:
+    Type: String
+    Description: "CloudFormation stack name of the VPC (for cross-stack imports)"
+    Default: iaapp-vpc-dev
+
+  AppSubnetB:
+    Type: String
+    Description: "Second app subnet ID (different AZ). Leave empty for single-AZ (no ALB)."
+    Default: ""
+
+  EnableContainerInsights:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+    Description: "Enable CloudWatch Container Insights (adds cost)"
+
+  EnableEcsCluster:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+    Description: "Create ECS cluster. Set false while SCP p-lgafaevf blocks ecs:CreateCluster."
+
+Conditions:
+  HasSecondSubnet: !Not [!Equals [!Ref AppSubnetB, ""]]
+  ContainerInsightsOn: !Equals [!Ref EnableContainerInsights, "true"]
+  CreateEcsCluster: !Equals [!Ref EnableEcsCluster, "true"]
+
+Resources:
+
+  # ── Cloud Map private DNS namespace ─────────────────────────────────────────
+  AgtNamespace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+      Name: agt.local
+      Vpc: !ImportValue
+        "Fn::Sub": "${VpcStackName}-VpcId"
+      Description: !Sub "Service discovery namespace for udabol-agt-${Environment}"
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+
+  # ── Security Group for ECS tasks ─────────────────────────────────────────────
+  EcsTaskSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "udabol-agt-tasks-${Environment}"
+      GroupDescription: !Sub "ECS Fargate tasks udabol-agt-${Environment}"
+      VpcId: !ImportValue
+        "Fn::Sub": "${VpcStackName}-VpcId"
+      Tags:
+        - Key: Name
+          Value: !Sub "udabol-agt-tasks-${Environment}"
+        - Key: Entorno
+          Value: !Ref Entorno
+
+  # Self-referencing ingress: tasks call each other on port 8080 via Cloud Map
+  EcsTaskSgSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EcsTaskSg
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      SourceSecurityGroupId: !Ref EcsTaskSg
+      Description: "Intra-cluster task-to-task (Cloud Map)"
+
+  # ── ECS Cluster (conditional — requires SCP to allow ecs:CreateCluster) ──────
+  EcsCluster:
+    Condition: CreateEcsCluster
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "udabol-agt-${Environment}"
+      ClusterSettings:
+        - Name: containerInsights
+          Value: !If [ContainerInsightsOn, enabled, disabled]
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+          Base: 1
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+
+  # ── Security Group for internal ALB (conditional) ────────────────────────────
+  AlbSg:
+    Condition: HasSecondSubnet
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "udabol-agt-alb-${Environment}"
+      GroupDescription: !Sub "Internal ALB udabol-agt-${Environment}"
+      VpcId: !ImportValue
+        "Fn::Sub": "${VpcStackName}-VpcId"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !ImportValue
+            "Fn::Sub": "${VpcStackName}-VpcCidr"
+          Description: "HTTP from VPC (internal)"
+      Tags:
+        - Key: Name
+          Value: !Sub "udabol-agt-alb-${Environment}"
+        - Key: Entorno
+          Value: !Ref Entorno
+
+  AlbToTasksIngress:
+    Condition: HasSecondSubnet
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EcsTaskSg
+      IpProtocol: tcp
+      FromPort: 8080
+      ToPort: 8080
+      SourceSecurityGroupId: !Ref AlbSg
+      Description: "ALB to ECS tasks"
+
+  # ── Internal ALB (conditional — requires 2 app subnets in different AZs) ─────
+  InternalAlb:
+    Condition: HasSecondSubnet
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "udabol-agt-alb-${Environment}"
+      Scheme: internal
+      Type: application
+      IpAddressType: ipv4
+      SecurityGroups:
+        - !Ref AlbSg
+      Subnets:
+        - !ImportValue
+          "Fn::Sub": "${VpcStackName}-AppSubnetA"
+        - !Ref AppSubnetB
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: "60"
+        - Key: deletion_protection.enabled
+          Value: "false"
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+
+  AlbListener:
+    Condition: HasSecondSubnet
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref InternalAlb
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: "404"
+            ContentType: application/json
+            MessageBody: '{"error":"not_found"}'
+
+Outputs:
+  ClusterArn:
+    Condition: CreateEcsCluster
+    Value: !GetAtt EcsCluster.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterArn"
+
+  ClusterName:
+    Condition: CreateEcsCluster
+    Value: !Ref EcsCluster
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterName"
+
+  NamespaceId:
+    Value: !Ref AgtNamespace
+    Export:
+      Name: !Sub "${AWS::StackName}-NamespaceId"
+
+  NamespaceArn:
+    Value: !GetAtt AgtNamespace.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-NamespaceArn"
+
+  NamespaceName:
+    Value: agt.local
+    Export:
+      Name: !Sub "${AWS::StackName}-NamespaceName"
+
+  EcsTaskSgId:
+    Value: !Ref EcsTaskSg
+    Export:
+      Name: !Sub "${AWS::StackName}-EcsTaskSgId"
+
+  AlbArn:
+    Condition: HasSecondSubnet
+    Value: !Ref InternalAlb
+    Export:
+      Name: !Sub "${AWS::StackName}-AlbArn"
+
+  AlbListenerArn:
+    Condition: HasSecondSubnet
+    Value: !Ref AlbListener
+    Export:
+      Name: !Sub "${AWS::StackName}-AlbListenerArn"
+
+  AlbSgId:
+    Condition: HasSecondSubnet
+    Value: !Ref AlbSg
+    Export:
+      Name: !Sub "${AWS::StackName}-AlbSgId"
+
+  AlbDnsName:
+    Condition: HasSecondSubnet
+    Value: !GetAtt InternalAlb.DNSName
+    Export:
+      Name: !Sub "${AWS::StackName}-AlbDnsName"
