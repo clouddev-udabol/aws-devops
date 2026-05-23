@@ -176,6 +176,31 @@ Los roles pre-existentes se dejaron intactos; los nuevos roles se usan en todos 
 
 ---
 
+## L-11 — Lex V2 runtime: prefijo IAM es `lex:` no `lexv2:`
+
+**Síntoma:** Lambda invocaba `lexv2-runtime.recognize_text()` pero recibía `AccessDeniedException` a pesar de tener la política IAM adjunta.
+
+**Causa:** El prefijo de la acción IAM para Lex V2 runtime es `lex:` (igual que Lex V1), **no** `lexv2:`. El SDK de boto3 llama al cliente `lexv2-runtime`, pero el IAM evalúa la acción como `lex:RecognizeText`.
+
+**Incorrecto:**
+```yaml
+Action:
+  - lexv2:RecognizeText    # ← RECHAZADO por IAM
+  - lexv2:RecognizeUtterance
+```
+
+**Correcto:**
+```yaml
+Action:
+  - lex:RecognizeText      # ← IAM evalúa esto
+  - lex:RecognizeUtterance
+Resource: !Sub "arn:aws:lex:${AWS::Region}:${AWS::AccountId}:bot-alias/${LexBotId}/*"
+```
+
+**Referencia:** [IAM actions for Amazon Lex V2](https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonlexv2.html) — todas las acciones tienen prefijo `lex:`.
+
+---
+
 ## Checklist para nuevos templates CFN
 
 Antes de deployar un nuevo template CFN, verificar:

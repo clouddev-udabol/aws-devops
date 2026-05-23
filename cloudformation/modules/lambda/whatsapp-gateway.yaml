@@ -62,8 +62,8 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - lexv2:RecognizeText
-                  - lexv2:RecognizeUtterance
+                  - lex:RecognizeText
+                  - lex:RecognizeUtterance
                 Resource: !Sub "arn:aws:lex:${AWS::Region}:${AWS::AccountId}:bot-alias/${LexBotId}/*"
         - PolicyName: SecretsRead
           PolicyDocument:
