@@ -1,0 +1,205 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: |
+  UDABOL ERP-Agent - C.1 - Lambda agt-whatsapp-gateway + HTTP API Gateway.
+  Receives Twilio WhatsApp webhooks, classifies intent via Lex V2, returns TwiML.
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, qa, prod]
+
+  Entorno:
+    Type: String
+    AllowedValues: [desarrollo, staging, produccion]
+    Description: "SCP tag value"
+
+  ImageUri:
+    Type: String
+    Description: "ECR image URI for the Lambda container (e.g. 245650696072.dkr.ecr.us-east-1.amazonaws.com/agt-whatsapp-gateway:latest)"
+
+  LexBotId:
+    Type: String
+    Description: "Lex V2 BotId (from udabol-intent-parser-lex-{env} stack)"
+
+  LexBotAliasId:
+    Type: String
+    Default: "TSTALIASID"
+    Description: "Lex V2 BotAliasId. TSTALIASID always points to built DRAFT."
+
+  LambdaMemoryMb:
+    Type: Number
+    Default: 256
+    MinValue: 128
+    MaxValue: 1024
+
+  LambdaTimeoutSeconds:
+    Type: Number
+    Default: 29
+    MinValue: 3
+    MaxValue: 29
+    Description: "Max 29s — API Gateway HTTP API hard limit is 30s"
+
+Resources:
+
+  # ── IAM Role for Lambda ───────────────────────────────────────────────────────
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "agt-whatsapp-gateway-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LexClassify
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lexv2:RecognizeText
+                  - lexv2:RecognizeUtterance
+                Resource: !Sub "arn:aws:lex:${AWS::Region}:${AWS::AccountId}:bot-alias/${LexBotId}/*"
+        - PolicyName: SecretsRead
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:agt/twilio-${Environment}*"
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+
+  # ── CloudWatch Log Group (explicit — controls retention) ─────────────────────
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/agt-whatsapp-gateway-${Environment}"
+      RetentionInDays: 14
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+
+  # ── Lambda Function ───────────────────────────────────────────────────────────
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: LambdaLogGroup
+    Properties:
+      FunctionName: !Sub "agt-whatsapp-gateway-${Environment}"
+      PackageType: Image
+      Code:
+        ImageUri: !Ref ImageUri
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: !Ref LambdaTimeoutSeconds
+      MemorySize: !Ref LambdaMemoryMb
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          LEX_BOT_ID: !Ref LexBotId
+          LEX_BOT_ALIAS_ID: !Ref LexBotAliasId
+          LEX_LOCALE_ID: es_419
+          LOG_LEVEL: INFO
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Servicio
+          Value: agt-whatsapp-gateway
+
+  # ── HTTP API Gateway (v2) ─────────────────────────────────────────────────────
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "agt-whatsapp-gateway-${Environment}"
+      ProtocolType: HTTP
+      Description: !Sub "WhatsApp webhook entry point — ${Environment}"
+      CorsConfiguration:
+        AllowOrigins: ["*"]
+        AllowMethods: [GET, POST]
+        AllowHeaders: [Content-Type, X-Twilio-Signature]
+      Tags:
+        Entorno: !Ref Entorno
+        Proyecto: udabol-erp-agent
+
+  LambdaIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt LambdaFunction.Arn
+      PayloadFormatVersion: "2.0"
+      TimeoutInMillis: 29000
+
+  RouteWebhook:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /webhook/whatsapp"
+      Target: !Sub "integrations/${LambdaIntegration}"
+
+  RouteWebhookJson:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "POST /webhook/whatsapp/json"
+      Target: !Sub "integrations/${LambdaIntegration}"
+
+  RouteHealth:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: "GET /health"
+      Target: !Sub "integrations/${LambdaIntegration}"
+
+  ApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: "$default"
+      AutoDeploy: true
+      Tags:
+        Entorno: !Ref Entorno
+
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref LambdaFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*"
+
+Outputs:
+  LambdaArn:
+    Value: !GetAtt LambdaFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaArn"
+
+  LambdaName:
+    Value: !Ref LambdaFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaName"
+
+  ApiEndpoint:
+    Value: !GetAtt HttpApi.ApiEndpoint
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiEndpoint"
+
+  WebhookUrl:
+    Value: !Sub "${HttpApi.ApiEndpoint}/webhook/whatsapp"
+    Export:
+      Name: !Sub "${AWS::StackName}-WebhookUrl"
+
+  HealthUrl:
+    Value: !Sub "${HttpApi.ApiEndpoint}/health"
+    Export:
+      Name: !Sub "${AWS::StackName}-HealthUrl"
