@@ -91,7 +91,7 @@ jobs:
     steps:
 
       - name: '[PRD-INI-101] Checkout'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: '[PRD-GATE-102] Pre-deploy context'
         run: |
@@ -107,7 +107,7 @@ jobs:
           echo "================================================"
 
       - name: '[PRD-SET-103] Configure AWS via OIDC (prod)'
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: arn:aws:iam::${{ env.PROD_ACCOUNT_ID
             }}:role/GithubActionsDeployRole-iaapp-prod

@@ -51,10 +51,10 @@ jobs:
     steps:
 
       - name: '[CI-INI-001] Checkout'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: '[CI-SET-002] Setup Python'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: 'pip'
@@ -71,7 +71,7 @@ jobs:
           echo "::endgroup::"
 
       - name: '[CI-SEC-005] cfn-nag — patrones inseguros'
-        uses: stelligent/cfn_nag@master
+        uses: stelligent/cfn_nag@v0.8.10
         with:
           input_path: cloudformation
           extra_args: --fail-on-warnings
@@ -105,10 +105,10 @@ jobs:
     steps:
 
       - name: '[CI-INI-101] Checkout'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: '[CI-SET-102] Configure AWS via OIDC (read-only DEV)'
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_DEV }}
           role-session-name: GitHubActions-iaapp-PR-${{ github.event.pull_request.number }}

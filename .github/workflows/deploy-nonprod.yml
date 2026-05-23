@@ -123,10 +123,10 @@ jobs:
     steps:
 
       - name: '[CD-INI-101] Checkout'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: '[CD-SET-102] Configure AWS via OIDC'
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ needs.context.outputs.role_arn }}
           role-session-name: iaapp-deploy-vpc-${{ github.run_id }}
@@ -182,10 +182,10 @@ jobs:
     steps:
 
       - name: '[CD-INI-201] Checkout'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: '[CD-SET-202] Configure AWS via OIDC'
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ needs.context.outputs.role_arn }}
           role-session-name: iaapp-deploy-budgets-${{ github.run_id }}
