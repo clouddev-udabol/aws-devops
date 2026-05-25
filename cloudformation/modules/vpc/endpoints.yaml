@@ -128,7 +128,7 @@ Resources:
       VpcId:
         !ImportValue
           "Fn::Sub": "${VpcStackName}-VpcId"
-      ServiceName: !Sub "com.amazonaws.${AWS::Region}.lex.runtime"
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.runtime.lex.v2"
       VpcEndpointType: Interface
       PrivateDnsEnabled: true
       SubnetIds:
