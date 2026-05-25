@@ -172,6 +172,7 @@ Resources:
                   - iam:PassRole
                 Resource:
                   - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/role-vpc-flowlogs-*"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/agt-ecs-*"
 
       Tags:
         - Key: Name
