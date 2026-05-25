@@ -42,11 +42,11 @@ Resources:
           CidrIp:
             !ImportValue
               "Fn::Sub": "${VpcStackName}-VpcCidr"
-          Description: "Tráfico desde cualquier recurso de la VPC"
+          Description: "All traffic from VPC CIDR to NAT instance"
       SecurityGroupEgress:
         - IpProtocol: "-1"
           CidrIp: "0.0.0.0/0"
-          Description: "Egress irrestricto hacia internet"
+          Description: "Unrestricted egress to internet"
       Tags:
         - Key: Name
           Value: !Sub "udabol-nat-instance-${Environment}"
