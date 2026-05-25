@@ -1,0 +1,6 @@
+[
+  { "ParameterKey": "Environment",  "ParameterValue": "dev" },
+  { "ParameterKey": "Entorno",      "ParameterValue": "desarrollo" },
+  { "ParameterKey": "VpcStackName", "ParameterValue": "iaapp-vpc-dev" },
+  { "ParameterKey": "InstanceType", "ParameterValue": "t4g.nano" }
+]

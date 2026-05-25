@@ -1,0 +1,13 @@
+[
+  { "ParameterKey": "Environment",           "ParameterValue": "qa" },
+  { "ParameterKey": "Entorno",               "ParameterValue": "staging" },
+  { "ParameterKey": "ClusterStackName",      "ParameterValue": "udabol-ecs-cluster-qa" },
+  { "ParameterKey": "VpcStackName",          "ParameterValue": "iaapp-vpc-qa" },
+  { "ParameterKey": "ImageAgtAgent",         "ParameterValue": "493735739951.dkr.ecr.us-east-1.amazonaws.com/agt-agent:qa-latest" },
+  { "ParameterKey": "ImageAgtToolapi",       "ParameterValue": "493735739951.dkr.ecr.us-east-1.amazonaws.com/agt-toolapi:qa-latest" },
+  { "ParameterKey": "ImageAgtLegacyAdapter", "ParameterValue": "493735739951.dkr.ecr.us-east-1.amazonaws.com/agt-legacy-adapter:qa-latest" },
+  { "ParameterKey": "DesiredCount",          "ParameterValue": "2" },
+  { "ParameterKey": "CpuUnits",              "ParameterValue": "256" },
+  { "ParameterKey": "MemoryMiB",             "ParameterValue": "512" },
+  { "ParameterKey": "LogRetentionDays",      "ParameterValue": "30" }
+]

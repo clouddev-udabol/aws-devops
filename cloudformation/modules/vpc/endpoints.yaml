@@ -1,0 +1,159 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: |
+  UDABOL ERP-Agent - VPC Endpoints for private-subnet ECS Fargate.
+  Required: ecr.api, ecr.dkr (interface) + s3 (gateway) + logs + secretsmanager.
+  Without these, tasks in App/Data subnets can't pull images or write logs.
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, qa, prod]
+
+  Entorno:
+    Type: String
+    AllowedValues: [desarrollo, staging, produccion]
+
+  VpcStackName:
+    Type: String
+    Default: iaapp-vpc-dev
+
+Resources:
+
+  # ── Security Group for all Interface Endpoints ────────────────────────────────
+  EndpointSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "udabol-vpc-endpoints-${Environment}"
+      GroupDescription: !Sub "VPC Endpoints ${Environment} - allow HTTPS from VPC"
+      VpcId:
+        !ImportValue
+          "Fn::Sub": "${VpcStackName}-VpcId"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp:
+            !ImportValue
+              "Fn::Sub": "${VpcStackName}-VpcCidr"
+          Description: "HTTPS desde cualquier recurso de la VPC hacia los Interface Endpoints"
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+
+  # ── ECR API — authentication token ───────────────────────────────────────────
+  EndpointEcrApi:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId:
+        !ImportValue
+          "Fn::Sub": "${VpcStackName}-VpcId"
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.api"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !ImportValue
+            "Fn::Sub": "${VpcStackName}-AppSubnetA"
+      SecurityGroupIds:
+        - !Ref EndpointSg
+
+  # ── ECR DKR — image layer pulls ──────────────────────────────────────────────
+  EndpointEcrDkr:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId:
+        !ImportValue
+          "Fn::Sub": "${VpcStackName}-VpcId"
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.ecr.dkr"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !ImportValue
+            "Fn::Sub": "${VpcStackName}-AppSubnetA"
+      SecurityGroupIds:
+        - !Ref EndpointSg
+
+  # ── S3 Gateway — ECR stores layers in S3 ─────────────────────────────────────
+  EndpointS3:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId:
+        !ImportValue
+          "Fn::Sub": "${VpcStackName}-VpcId"
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcEndpointType: Gateway
+      RouteTableIds:
+        - !ImportValue
+            "Fn::Sub": "${VpcStackName}-RouteTablePrivateApp"
+        - !ImportValue
+            "Fn::Sub": "${VpcStackName}-RouteTablePrivateData"
+
+  # ── CloudWatch Logs — awslogs driver ─────────────────────────────────────────
+  EndpointLogs:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId:
+        !ImportValue
+          "Fn::Sub": "${VpcStackName}-VpcId"
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.logs"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !ImportValue
+            "Fn::Sub": "${VpcStackName}-AppSubnetA"
+      SecurityGroupIds:
+        - !Ref EndpointSg
+
+  # ── Secrets Manager ───────────────────────────────────────────────────────────
+  EndpointSecrets:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId:
+        !ImportValue
+          "Fn::Sub": "${VpcStackName}-VpcId"
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.secretsmanager"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !ImportValue
+            "Fn::Sub": "${VpcStackName}-AppSubnetA"
+      SecurityGroupIds:
+        - !Ref EndpointSg
+
+  # ── Lex V2 Runtime — agt-agent NLU calls ─────────────────────────────────────
+  EndpointLex:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId:
+        !ImportValue
+          "Fn::Sub": "${VpcStackName}-VpcId"
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.lex.runtime"
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - !ImportValue
+            "Fn::Sub": "${VpcStackName}-AppSubnetA"
+      SecurityGroupIds:
+        - !Ref EndpointSg
+
+Outputs:
+  EndpointSgId:
+    Value: !Ref EndpointSg
+    Export:
+      Name: !Sub "${AWS::StackName}-EndpointSgId"
+
+  EndpointEcrApiId:
+    Value: !Ref EndpointEcrApi
+    Export:
+      Name: !Sub "${AWS::StackName}-EndpointEcrApiId"
+
+  EndpointEcrDkrId:
+    Value: !Ref EndpointEcrDkr
+    Export:
+      Name: !Sub "${AWS::StackName}-EndpointEcrDkrId"
+
+  EndpointS3Id:
+    Value: !Ref EndpointS3
+    Export:
+      Name: !Sub "${AWS::StackName}-EndpointS3Id"

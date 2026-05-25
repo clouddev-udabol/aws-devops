@@ -1,0 +1,42 @@
+# .checkov.yaml — Baseline de checks intencionalmente omitidos
+# Repositorio: clouddev-udabol/aws-devops
+# Contexto: infraestructura DEV/QA para UDABOL ERP-Agent (SOW-002)
+#
+# Cada skip está justificado. Revisión requerida al promover a prod.
+# Ver ADR-FINOPS-001 para contexto de decisiones de costo vs seguridad.
+
+skip-check:
+  # ── ECR ────────────────────────────────────────────────────────────────────────
+  - CKV_AWS_51    # ECR mutable tags: dev-latest/qa-latest son intencionalmente
+                  # mutables — requerido por el workflow de CI/CD (no semver en DEV/QA)
+  - CKV_AWS_136   # ECR KMS encryption: FinOps DEV/QA — $1/key/mes por 7 repos = $7/mes
+                  # innecesario; imágenes no contienen datos sensibles en tránsito
+
+  # ── CloudWatch Logs ────────────────────────────────────────────────────────────
+  - CKV_AWS_158   # CW Log Group KMS: FinOps DEV/QA — misma CMK que ECR suma >$1/mes
+                  # Logs de DEV/QA no requieren cifrado en reposo por compliance
+
+  # ── SNS ────────────────────────────────────────────────────────────────────────
+  - CKV_AWS_26    # SNS KMS: topic de alertas de Budget — datos no sensibles (solo
+                  # notificaciones de umbral de costo), FinOps DEV/QA
+
+  # ── API Gateway ────────────────────────────────────────────────────────────────
+  - CKV_AWS_95    # API GW V2 access logging: DEV/QA Twilio webhook — bajo tráfico,
+                  # logs de Lambda son suficientes para debugging
+
+  # ── ALB internal DEV/QA ────────────────────────────────────────────────────────
+  - CKV_AWS_2     # ALB HTTPS: ALB es interno (scheme: internal), HTTP dentro de VPC
+                  # sin exposición pública; TLS se maneja a nivel de app si se requiere
+  - CKV_AWS_103   # TLS v1.2: N/A — no hay listener HTTPS en el ALB interno DEV/QA
+  - CKV_AWS_91    # ALB access logging: FinOps — requiere bucket S3 dedicado; DEV/QA
+                  # no tiene SLA que justifique el costo del almacenamiento de logs
+
+  # ── Lambda whatsapp-gateway ────────────────────────────────────────────────────
+  - CKV_AWS_117   # Lambda en VPC: función es webhook público de Twilio — requiere
+                  # egress a internet sin NAT; ponerla en VPC complicaría el routing
+  - CKV_AWS_115   # Lambda concurrency limit: DEV/QA — bajo tráfico, sin necesidad
+                  # de throttling explícito; costo innecesario de config
+  - CKV_AWS_116   # Lambda DLQ: DEV/QA — errores async visibles en CloudWatch Logs;
+                  # DLQ + SQS agrega $0.40/mes sin valor real en este entorno
+  - CKV_AWS_173   # Lambda env var KMS: secrets vienen de Secrets Manager en runtime
+                  # (no en env vars planas); KMS adicional es redundante

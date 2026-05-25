@@ -1,0 +1,8 @@
+[
+  { "ParameterKey": "Environment",              "ParameterValue": "dev" },
+  { "ParameterKey": "Entorno",                  "ParameterValue": "desarrollo" },
+  { "ParameterKey": "VpcStackName",             "ParameterValue": "iaapp-vpc-dev" },
+  { "ParameterKey": "AppSubnetB",               "ParameterValue": "" },
+  { "ParameterKey": "EnableContainerInsights",  "ParameterValue": "false" },
+  { "ParameterKey": "EnableEcsCluster",         "ParameterValue": "true" }
+]

@@ -1,0 +1,378 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "SOW-002 | ECR repositories for agt-* microservices"
+
+Parameters:
+  Entorno:
+    Type: String
+    AllowedValues: [desarrollo, staging]
+    Description: "SCP tag value — desarrollo=DEV, staging=QA"
+
+  LifecycleMaxImages:
+    Type: Number
+    Default: 5
+    Description: "Max tagged images to retain per repo"
+
+  UntaggedExpiryDays:
+    Type: Number
+    Default: 1
+    Description: "Days before untagged images are expired"
+
+Resources:
+
+  RepoCommon:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: agt-common
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last ${LifecycleMaxImages} tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["v", "dev-", "qa-"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": ${LifecycleMaxImages}
+                },
+                "action": { "type": "expire" }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Expire untagged after ${UntaggedExpiryDays} day",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": ${UntaggedExpiryDays}
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Modulo
+          Value: agt-common
+
+  RepoIntentParser:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: agt-intent-parser
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last ${LifecycleMaxImages} tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["v", "dev-", "qa-"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": ${LifecycleMaxImages}
+                },
+                "action": { "type": "expire" }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Expire untagged after ${UntaggedExpiryDays} day",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": ${UntaggedExpiryDays}
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Modulo
+          Value: agt-intent-parser
+
+  RepoWhatsappGateway:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: agt-whatsapp-gateway
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last ${LifecycleMaxImages} tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["v", "dev-", "qa-"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": ${LifecycleMaxImages}
+                },
+                "action": { "type": "expire" }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Expire untagged after ${UntaggedExpiryDays} day",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": ${UntaggedExpiryDays}
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Modulo
+          Value: agt-whatsapp-gateway
+
+  RepoToolApi:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: agt-toolapi
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last ${LifecycleMaxImages} tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["v", "dev-", "qa-"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": ${LifecycleMaxImages}
+                },
+                "action": { "type": "expire" }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Expire untagged after ${UntaggedExpiryDays} day",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": ${UntaggedExpiryDays}
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Modulo
+          Value: agt-toolapi
+
+  RepoAgent:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: agt-agent
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last ${LifecycleMaxImages} tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["v", "dev-", "qa-"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": ${LifecycleMaxImages}
+                },
+                "action": { "type": "expire" }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Expire untagged after ${UntaggedExpiryDays} day",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": ${UntaggedExpiryDays}
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Modulo
+          Value: agt-agent
+
+  RepoLegacyAdapter:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: agt-legacy-adapter
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last ${LifecycleMaxImages} tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["v", "dev-", "qa-"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": ${LifecycleMaxImages}
+                },
+                "action": { "type": "expire" }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Expire untagged after ${UntaggedExpiryDays} day",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": ${UntaggedExpiryDays}
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Modulo
+          Value: agt-legacy-adapter
+
+  RepoReadmodel:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: agt-readmodel
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: !Sub |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last ${LifecycleMaxImages} tagged images",
+                "selection": {
+                  "tagStatus": "tagged",
+                  "tagPrefixList": ["v", "dev-", "qa-"],
+                  "countType": "imageCountMoreThan",
+                  "countNumber": ${LifecycleMaxImages}
+                },
+                "action": { "type": "expire" }
+              },
+              {
+                "rulePriority": 2,
+                "description": "Expire untagged after ${UntaggedExpiryDays} day",
+                "selection": {
+                  "tagStatus": "untagged",
+                  "countType": "sinceImagePushed",
+                  "countUnit": "days",
+                  "countNumber": ${UntaggedExpiryDays}
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Modulo
+          Value: agt-readmodel
+
+Outputs:
+  RepoCommon:
+    Value: !GetAtt RepoCommon.RepositoryUri
+    Export:
+      Name: "ecr-agt-common-uri"
+
+  RepoIntentParserUri:
+    Value: !GetAtt RepoIntentParser.RepositoryUri
+    Export:
+      Name: "ecr-agt-intent-parser-uri"
+
+  RepoWhatsappGatewayUri:
+    Value: !GetAtt RepoWhatsappGateway.RepositoryUri
+    Export:
+      Name: "ecr-agt-whatsapp-gateway-uri"
+
+  RepoToolApiUri:
+    Value: !GetAtt RepoToolApi.RepositoryUri
+    Export:
+      Name: "ecr-agt-toolapi-uri"
+
+  RepoAgentUri:
+    Value: !GetAtt RepoAgent.RepositoryUri
+    Export:
+      Name: "ecr-agt-agent-uri"
+
+  RepoLegacyAdapterUri:
+    Value: !GetAtt RepoLegacyAdapter.RepositoryUri
+    Export:
+      Name: "ecr-agt-legacy-adapter-uri"
+
+  RepoReadmodelUri:
+    Value: !GetAtt RepoReadmodel.RepositoryUri
+    Export:
+      Name: "ecr-agt-readmodel-uri"

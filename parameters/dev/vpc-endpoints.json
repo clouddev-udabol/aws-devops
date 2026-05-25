@@ -1,0 +1,5 @@
+[
+  { "ParameterKey": "Environment",  "ParameterValue": "dev" },
+  { "ParameterKey": "Entorno",      "ParameterValue": "desarrollo" },
+  { "ParameterKey": "VpcStackName", "ParameterValue": "iaapp-vpc-dev" }
+]

@@ -1,0 +1,9 @@
+[
+  { "ParameterKey": "Environment",           "ParameterValue": "dev" },
+  { "ParameterKey": "Entorno",               "ParameterValue": "desarrollo" },
+  { "ParameterKey": "ImageUri",              "ParameterValue": "245650696072.dkr.ecr.us-east-1.amazonaws.com/agt-whatsapp-gateway:latest" },
+  { "ParameterKey": "LexBotId",             "ParameterValue": "AMEBQJXNM2" },
+  { "ParameterKey": "LexBotAliasId",        "ParameterValue": "TSTALIASID" },
+  { "ParameterKey": "LambdaMemoryMb",       "ParameterValue": "256" },
+  { "ParameterKey": "LambdaTimeoutSeconds", "ParameterValue": "29" }
+]

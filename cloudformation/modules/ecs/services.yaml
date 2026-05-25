@@ -1,0 +1,470 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: |
+  UDABOL ERP-Agent - C.2 - ECS Fargate Services.
+  Deploys agt-agent, agt-toolapi, agt-legacy-adapter as Fargate tasks.
+  Service Discovery via Cloud Map agt.local (single-AZ DEV/QA).
+  Logs to CloudWatch /agt/{service}/{env} (awslogs driver, Plan A E7).
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, qa, prod]
+
+  Entorno:
+    Type: String
+    AllowedValues: [desarrollo, staging, produccion]
+    Description: "SCP tag value"
+
+  ClusterStackName:
+    Type: String
+    Description: "Stack name of udabol-ecs-cluster-{env} (for cross-stack imports)"
+    Default: udabol-ecs-cluster-dev
+
+  VpcStackName:
+    Type: String
+    Description: "Stack name of the VPC (for cross-stack imports)"
+    Default: iaapp-vpc-dev
+
+  ImageAgtAgent:
+    Type: String
+    Description: "ECR image URI for agt-agent (e.g. 245650696072.dkr.ecr.us-east-1.amazonaws.com/agt-agent:dev-latest)"
+
+  ImageAgtToolapi:
+    Type: String
+    Description: "ECR image URI for agt-toolapi"
+
+  ImageAgtLegacyAdapter:
+    Type: String
+    Description: "ECR image URI for agt-legacy-adapter"
+
+  DesiredCount:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 4
+    Description: "Desired task count per service (1 DEV, 2 QA)"
+
+  CpuUnits:
+    Type: Number
+    Default: 256
+    AllowedValues: [256, 512, 1024]
+
+  MemoryMiB:
+    Type: Number
+    Default: 512
+    AllowedValues: [512, 1024, 2048]
+
+  LogRetentionDays:
+    Type: Number
+    Default: 14
+    AllowedValues: [7, 14, 30, 90]
+
+  # SubnetId y AssignPublicIp eliminados — ECS tasks siempre en AppSubnetA (privada).
+  # Requiere: udabol-vpc-endpoints-{env} y udabol-nat-instance-{env} desplegados primero.
+  # ISS-003 resuelto: endpoints en AppSubnetA, tasks en AppSubnetA → misma subnet. ADR-FINOPS-001.
+
+Resources:
+
+  # ── IAM Execution Role (shared by all 3 task definitions) ────────────────────
+  EcsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "agt-ecs-exec-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: SecretsRead
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:agt/*"
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+
+  # ── IAM Task Role (app-level AWS calls, extensible per service) ──────────────
+  EcsTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "agt-ecs-task-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: LexClassify
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lex:RecognizeText
+                  - lex:RecognizeUtterance
+                Resource: !Sub "arn:aws:lex:${AWS::Region}:${AWS::AccountId}:bot-alias/*"
+        - PolicyName: SecretsRead
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:agt/*"
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+
+  # ── CloudWatch Log Groups ─────────────────────────────────────────────────────
+  LogGroupAgent:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/agt/agt-agent/${Environment}"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+
+  LogGroupToolapi:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/agt/agt-toolapi/${Environment}"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+
+  LogGroupLegacyAdapter:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/agt/agt-legacy-adapter/${Environment}"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+
+  # ── agt-agent ────────────────────────────────────────────────────────────────
+  TaskDefAgent:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "agt-agent-${Environment}"
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: !Ref CpuUnits
+      Memory: !Ref MemoryMiB
+      ExecutionRoleArn: !GetAtt EcsExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: agt-agent
+          Image: !Ref ImageAgtAgent
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: LOG_LEVEL
+              Value: INFO
+          HealthCheck:
+            Command: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health')\" || exit 1"]
+            Interval: 30
+            Timeout: 5
+            Retries: 2
+            StartPeriod: 15
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroupAgent
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: agt-agent
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Servicio
+          Value: agt-agent
+
+  SdAgent:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: agt-agent
+      NamespaceId:
+        !ImportValue
+          "Fn::Sub": "${ClusterStackName}-NamespaceId"
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 10
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+
+  ServiceAgent:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub "agt-agent-${Environment}"
+      Cluster:
+        !ImportValue
+          "Fn::Sub": "${ClusterStackName}-ClusterArn"
+      TaskDefinition: !Ref TaskDefAgent
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !ImportValue
+                "Fn::Sub": "${VpcStackName}-AppSubnetA"
+          SecurityGroups:
+            - !ImportValue
+                "Fn::Sub": "${ClusterStackName}-EcsTaskSgId"
+      ServiceRegistries:
+        - RegistryArn: !GetAtt SdAgent.Arn
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: false
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Servicio
+          Value: agt-agent
+
+  # ── agt-toolapi ──────────────────────────────────────────────────────────────
+  TaskDefToolapi:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "agt-toolapi-${Environment}"
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: !Ref CpuUnits
+      Memory: !Ref MemoryMiB
+      ExecutionRoleArn: !GetAtt EcsExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: agt-toolapi
+          Image: !Ref ImageAgtToolapi
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: LOG_LEVEL
+              Value: INFO
+          HealthCheck:
+            Command: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health')\" || exit 1"]
+            Interval: 30
+            Timeout: 5
+            Retries: 2
+            StartPeriod: 15
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroupToolapi
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: agt-toolapi
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Servicio
+          Value: agt-toolapi
+
+  SdToolapi:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: agt-toolapi
+      NamespaceId:
+        !ImportValue
+          "Fn::Sub": "${ClusterStackName}-NamespaceId"
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 10
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+
+  ServiceToolapi:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub "agt-toolapi-${Environment}"
+      Cluster:
+        !ImportValue
+          "Fn::Sub": "${ClusterStackName}-ClusterArn"
+      TaskDefinition: !Ref TaskDefToolapi
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !ImportValue
+                "Fn::Sub": "${VpcStackName}-AppSubnetA"
+          SecurityGroups:
+            - !ImportValue
+                "Fn::Sub": "${ClusterStackName}-EcsTaskSgId"
+      ServiceRegistries:
+        - RegistryArn: !GetAtt SdToolapi.Arn
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: false
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Servicio
+          Value: agt-toolapi
+
+  # ── agt-legacy-adapter ───────────────────────────────────────────────────────
+  TaskDefLegacyAdapter:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "agt-legacy-adapter-${Environment}"
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: !Ref CpuUnits
+      Memory: !Ref MemoryMiB
+      ExecutionRoleArn: !GetAtt EcsExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: agt-legacy-adapter
+          Image: !Ref ImageAgtLegacyAdapter
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: LOG_LEVEL
+              Value: INFO
+          HealthCheck:
+            Command: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/health')\" || exit 1"]
+            Interval: 30
+            Timeout: 5
+            Retries: 2
+            StartPeriod: 15
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroupLegacyAdapter
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: agt-legacy-adapter
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Servicio
+          Value: agt-legacy-adapter
+
+  SdLegacyAdapter:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: agt-legacy-adapter
+      NamespaceId:
+        !ImportValue
+          "Fn::Sub": "${ClusterStackName}-NamespaceId"
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 10
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+
+  ServiceLegacyAdapter:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub "agt-legacy-adapter-${Environment}"
+      Cluster:
+        !ImportValue
+          "Fn::Sub": "${ClusterStackName}-ClusterArn"
+      TaskDefinition: !Ref TaskDefLegacyAdapter
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !ImportValue
+                "Fn::Sub": "${VpcStackName}-AppSubnetA"
+          SecurityGroups:
+            - !ImportValue
+                "Fn::Sub": "${ClusterStackName}-EcsTaskSgId"
+      ServiceRegistries:
+        - RegistryArn: !GetAtt SdLegacyAdapter.Arn
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: false
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Servicio
+          Value: agt-legacy-adapter
+
+Outputs:
+  ServiceAgentArn:
+    Value: !Ref ServiceAgent
+    Export:
+      Name: !Sub "${AWS::StackName}-ServiceAgentArn"
+
+  ServiceToolapiArn:
+    Value: !Ref ServiceToolapi
+    Export:
+      Name: !Sub "${AWS::StackName}-ServiceToolapiArn"
+
+  ServiceLegacyAdapterArn:
+    Value: !Ref ServiceLegacyAdapter
+    Export:
+      Name: !Sub "${AWS::StackName}-ServiceLegacyAdapterArn"
+
+  AgentEndpoint:
+    Value: "http://agt-agent.agt.local:8080"
+    Export:
+      Name: !Sub "${AWS::StackName}-AgentEndpoint"
+
+  ToolapiEndpoint:
+    Value: "http://agt-toolapi.agt.local:8080"
+    Export:
+      Name: !Sub "${AWS::StackName}-ToolapiEndpoint"
+
+  LegacyAdapterEndpoint:
+    Value: "http://agt-legacy-adapter.agt.local:8080"
+    Export:
+      Name: !Sub "${AWS::StackName}-LegacyAdapterEndpoint"
