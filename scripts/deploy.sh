@@ -13,8 +13,8 @@
 #
 # Stacks soportados:
 #   vpc | budgets | nat-instance | vpc-endpoints
-#   ecs-cluster | ecs-services | ecr | rds
-#   whatsapp-gateway | msk | ecs-services-update
+#   ecs-cluster | ecs-services | otel-collector | ecr | rds
+#   whatsapp-gateway | msk
 # ============================================================
 
 set -euo pipefail
@@ -68,6 +68,10 @@ case "${STACK}" in
   msk)
     STACK_NAME="udabol-msk-${ENV}"
     TEMPLATE_FILE="cloudformation/modules/msk/msk-serverless.yaml"
+    ;;
+  otel-collector)
+    STACK_NAME="udabol-otel-collector-${ENV}"
+    TEMPLATE_FILE="cloudformation/modules/ecs/otel-collector.yaml"
     ;;
   *)
     STACK_NAME="${PROJECT}-${STACK}-${ENV}"

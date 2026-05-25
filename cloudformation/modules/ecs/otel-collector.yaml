@@ -1,0 +1,258 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: |
+  UDABOL ERP-Agent - E.1 - OTel Collector ECS Fargate task (ADOT).
+  Receives OTLP/gRPC on port 4317, exports to AWS X-Ray + CloudWatch EMF.
+  Service Discovery: otel-collector.agt.local:4317 (Cloud Map agt.local).
+  Adds SG ingress rule for port 4317 to the shared ECS task security group.
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, qa, prod]
+
+  Entorno:
+    Type: String
+    AllowedValues: [desarrollo, staging, produccion]
+    Description: "SCP tag value"
+
+  ClusterStackName:
+    Type: String
+    Description: "Stack name of udabol-ecs-cluster-{env} (for cross-stack imports)"
+    Default: udabol-ecs-cluster-dev
+
+  VpcStackName:
+    Type: String
+    Description: "Stack name of the VPC (for cross-stack imports)"
+    Default: iaapp-vpc-dev
+
+  OtelCollectorImage:
+    Type: String
+    Default: "public.ecr.aws/aws-observability/aws-otel-collector:latest"
+    Description: "ADOT collector image URI"
+
+  OtelDesiredCount:
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 2
+    Description: "Desired task count (1 DEV/QA, 0 to disable)"
+
+  LogRetentionDays:
+    Type: Number
+    Default: 7
+    AllowedValues: [7, 14, 30, 90]
+    Description: "Retention for /udabol/{env}/agt log group"
+
+Resources:
+
+  # ── Port 4317 gRPC OTLP ingress on shared ECS task SG ────────────────────────
+  # services.yaml only has port 8080 self-referencing ingress; OTel needs 4317
+  EcsTaskSgOtelIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        !ImportValue
+          "Fn::Sub": "${ClusterStackName}-EcsTaskSgId"
+      IpProtocol: tcp
+      FromPort: 4317
+      ToPort: 4317
+      SourceSecurityGroupId:
+        !ImportValue
+          "Fn::Sub": "${ClusterStackName}-EcsTaskSgId"
+      Description: "OTel Collector gRPC OTLP from ECS tasks"
+
+  # ── IAM Task Role for ADOT (X-Ray + CloudWatch EMF) ──────────────────────────
+  OtelTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "agt-ecs-otel-task-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: XRayAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: "*"
+        - PolicyName: CloudWatchEMFAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                  - logs:DescribeLogGroups
+                  - cloudwatch:PutMetricData
+                Resource: "*"
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+
+  # ── CloudWatch Log Group for container + EMF metrics ─────────────────────────
+  LogGroupOtel:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/udabol/${Environment}/agt"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+
+  # ── ECS Task Definition ───────────────────────────────────────────────────────
+  TaskDefOtelCollector:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "agt-otel-collector-${Environment}"
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: "256"
+      Memory: "512"
+      # Reuse the shared execution role created by udabol-ecs-services-{env}
+      ExecutionRoleArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/agt-ecs-exec-${Environment}"
+      TaskRoleArn: !GetAtt OtelTaskRole.Arn
+      ContainerDefinitions:
+        - Name: otel-collector
+          Image: !Ref OtelCollectorImage
+          PortMappings:
+            - ContainerPort: 4317
+              Protocol: tcp
+          Environment:
+            - Name: AOT_CONFIG_CONTENT
+              Value: !Sub |
+                extensions:
+                  health_check:
+                    endpoint: "0.0.0.0:13133"
+                receivers:
+                  otlp:
+                    protocols:
+                      grpc:
+                        endpoint: "0.0.0.0:4317"
+                processors:
+                  batch:
+                    send_batch_size: 8192
+                    timeout: 5s
+                exporters:
+                  awsxray:
+                    region: ${AWS::Region}
+                  awsemf:
+                    namespace: udabol/agt
+                    region: ${AWS::Region}
+                    log_group_name: /udabol/${Environment}/agt
+                    log_stream_name: otel-emf-metrics
+                    dimension_rollup_option: NoDimensionRollup
+                service:
+                  extensions: [health_check]
+                  pipelines:
+                    traces:
+                      receivers: [otlp]
+                      processors: [batch]
+                      exporters: [awsxray]
+                    metrics:
+                      receivers: [otlp]
+                      processors: [batch]
+                      exporters: [awsemf]
+          HealthCheck:
+            Command: ["CMD", "/healthcheck"]
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 30
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroupOtel
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: otel-collector
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Servicio
+          Value: otel-collector
+
+  # ── Cloud Map Service (otel-collector.agt.local) ──────────────────────────────
+  SdOtelCollector:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: otel-collector
+      NamespaceId:
+        !ImportValue
+          "Fn::Sub": "${ClusterStackName}-NamespaceId"
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 10
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+
+  # ── ECS Service ───────────────────────────────────────────────────────────────
+  ServiceOtelCollector:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub "agt-otel-collector-${Environment}"
+      Cluster:
+        !ImportValue
+          "Fn::Sub": "${ClusterStackName}-ClusterArn"
+      TaskDefinition: !Ref TaskDefOtelCollector
+      DesiredCount: !Ref OtelDesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !ImportValue
+                "Fn::Sub": "${VpcStackName}-AppSubnetA"
+          SecurityGroups:
+            - !ImportValue
+                "Fn::Sub": "${ClusterStackName}-EcsTaskSgId"
+      ServiceRegistries:
+        - RegistryArn: !GetAtt SdOtelCollector.Arn
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: false
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Servicio
+          Value: otel-collector
+
+Outputs:
+  OtelCollectorEndpoint:
+    Value: "otel-collector.agt.local:4317"
+    Export:
+      Name: !Sub "${AWS::StackName}-OtelEndpoint"
+
+  ServiceOtelCollectorArn:
+    Value: !Ref ServiceOtelCollector
+    Export:
+      Name: !Sub "${AWS::StackName}-ServiceArn"
+
+  LogGroupOtelName:
+    Value: !Ref LogGroupOtel
+    Export:
+      Name: !Sub "${AWS::StackName}-LogGroupName"

@@ -1,0 +1,8 @@
+[
+  { "ParameterKey": "Environment",      "ParameterValue": "qa" },
+  { "ParameterKey": "Entorno",          "ParameterValue": "staging" },
+  { "ParameterKey": "ClusterStackName", "ParameterValue": "udabol-ecs-cluster-qa" },
+  { "ParameterKey": "VpcStackName",     "ParameterValue": "iaapp-vpc-qa" },
+  { "ParameterKey": "OtelDesiredCount", "ParameterValue": "1" },
+  { "ParameterKey": "LogRetentionDays", "ParameterValue": "7" }
+]

@@ -1,0 +1,8 @@
+[
+  { "ParameterKey": "Environment",      "ParameterValue": "dev" },
+  { "ParameterKey": "Entorno",          "ParameterValue": "desarrollo" },
+  { "ParameterKey": "ClusterStackName", "ParameterValue": "udabol-ecs-cluster-dev" },
+  { "ParameterKey": "VpcStackName",     "ParameterValue": "iaapp-vpc-dev" },
+  { "ParameterKey": "OtelDesiredCount", "ParameterValue": "1" },
+  { "ParameterKey": "LogRetentionDays", "ParameterValue": "7" }
+]
