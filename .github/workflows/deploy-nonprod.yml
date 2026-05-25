@@ -1,28 +1,12 @@
-# ============================================================
-# iaapp — UDABOL — [CD] Deploy a Non-Production (DEV / QA)
-#
-# Trigger:
-#   - Auto: push a main → despliega a DEV
-#   - Manual: workflow_dispatch → desarrollador elige DEV o QA
+# iaapp - UDABOL - [CD] Deploy a Non-Production (DEV / QA)
+# Auto: push main -> vpc DEV | Manual: dispatch -> env+stack choice
 #
 # Cuentas AWS:
 #   DEV: 245650696072
 #   QA:  493735739951
-#
 # Notas:
 #   - proy-app-gha-role-development y proy-app-gha-role-qa requieren
-#     inline policy IAMForVPCFlowLogs (iam:GetRole/CreateRole/DeleteRole/...)
-#     scoped a arn:aws:iam::<account>:role/role-vpc-flowlogs-*
-#     Aplicada el 2026-05-22. Ver docs/convenios-iac.md §2.
-#
-# IDs de proceso:
-#   [CD-INI-101] Checkout
-#   [CD-SET-102] OIDC + caller identity
-#   [CD-IAC-103] Validate templates
-#   [CD-DEP-104] Deploy stack
-#   [CD-OPS-105] Smoke test
-#   [CD-FIN-106] Summary
-# ============================================================
+#     inline policy IAMForVPCFlowLogs aplicada 2026-05-22.
 
 name: deploy-nonprod
 
@@ -47,7 +31,7 @@ on:
         description: 'Stack a desplegar'
         required: true
         type: choice
-        options: [vpc, budgets, all]
+        options: [vpc, budgets, nat-instance, vpc-endpoints, ecs-cluster, ecs-services, ecr, rds, whatsapp-gateway, all]
         default: vpc
       enable_nat_gateway:
         description: 'Habilitar NAT Gateway (~$32/mes c/u)'
@@ -56,7 +40,7 @@ on:
 
 concurrency:
   group: deploy-nonprod-${{ github.event.inputs.environment || 'dev' }}
-  cancel-in-progress: false  # NO cancelar deploys en curso
+  cancel-in-progress: false
 
 permissions:
   id-token: write
@@ -70,7 +54,7 @@ env:
 jobs:
 
   # ----------------------------------------------------------
-  # JOB 1 — Determinar ambiente y configuración
+  # JOB 1 - Determinar ambiente y configuracion
   # ----------------------------------------------------------
   context:
     name: '[CD] Resolver contexto'
@@ -90,26 +74,19 @@ jobs:
           else
             ENV=${{ github.event.inputs.environment }}
           fi
-
           case $ENV in
             dev) ROLE=$ROLE_DEV ;;
             qa)  ROLE=$ROLE_QA  ;;
-            *)
-              echo "ERROR: ambiente '$ENV' no soportado en este workflow"
-              exit 1
-              ;;
+            *)   echo "ERROR: ambiente no soportado"; exit 1 ;;
           esac
-
           ACCOUNT=$(echo "$ROLE" | cut -d: -f5)
-
           echo "environment=${ENV}" >> $GITHUB_OUTPUT
           echo "account_id=${ACCOUNT}" >> $GITHUB_OUTPUT
           echo "role_arn=${ROLE}" >> $GITHUB_OUTPUT
-
           echo "::notice::Desplegando a ${ENV} (cuenta ${ACCOUNT})"
 
   # ----------------------------------------------------------
-  # JOB 2 — Deploy VPC
+  # JOB 2 - Deploy VPC (push auto o stack=vpc/all)
   # ----------------------------------------------------------
   deploy-vpc:
     name: '[CD] Deploy VPC ${{ needs.context.outputs.environment }}'
@@ -121,43 +98,26 @@ jobs:
       github.event.inputs.stack == 'vpc' ||
       github.event.inputs.stack == 'all'
     steps:
-
       - name: '[CD-INI-101] Checkout'
         uses: actions/checkout@v6
-
       - name: '[CD-SET-102] Configure AWS via OIDC'
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ needs.context.outputs.role_arn }}
           role-session-name: iaapp-deploy-vpc-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
-
       - name: '[CD-SET-103] Verify identity'
         run: aws sts get-caller-identity
-
       - name: '[CD-IAC-104] Validate template'
         run: |
           aws cloudformation validate-template \
             --template-body file://cloudformation/modules/vpc/vpc.yaml \
             --region ${{ env.AWS_REGION }}
-
       - name: '[CD-DEP-105] Deploy VPC'
         env:
           ENV: ${{ needs.context.outputs.environment }}
           NAT_GW: ${{ github.event.inputs.enable_nat_gateway || 'true' }}
-        run: |
-          STACK_NAME=${{ env.PROJECT }}-vpc-${ENV}
-          SHA=${GITHUB_SHA::7}
-          DATE=$(date -u +%Y-%m-%d)
-
-          echo "[CD-DEP-105] Deploying ${STACK_NAME}"
-          echo "  Account:    ${{ needs.context.outputs.account_id }}"
-          echo "  Region:     ${{ env.AWS_REGION }}"
-          echo "  CommitHash: ${SHA}"
-          echo "  Date:       ${DATE}"
-
-          ./scripts/deploy.sh ${ENV} vpc
-
+        run: ./scripts/deploy.sh ${ENV} vpc
       - name: '[CD-OPS-106] Print outputs'
         env:
           ENV: ${{ needs.context.outputs.environment }}
@@ -169,7 +129,7 @@ jobs:
             --output table
 
   # ----------------------------------------------------------
-  # JOB 3 — Deploy Budgets (solo si stack=budgets o all)
+  # JOB 3 - Deploy Budgets (solo si stack=budgets o all)
   # ----------------------------------------------------------
   deploy-budgets:
     name: '[CD] Deploy Budgets ${{ needs.context.outputs.environment }}'
@@ -180,39 +140,75 @@ jobs:
       github.event_name == 'workflow_dispatch' &&
       (github.event.inputs.stack == 'budgets' || github.event.inputs.stack == 'all')
     steps:
-
       - name: '[CD-INI-201] Checkout'
         uses: actions/checkout@v6
-
       - name: '[CD-SET-202] Configure AWS via OIDC'
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ needs.context.outputs.role_arn }}
           role-session-name: iaapp-deploy-budgets-${{ github.run_id }}
           aws-region: ${{ env.AWS_REGION }}
-
       - name: '[CD-DEP-203] Deploy Budgets'
         env:
           ENV: ${{ needs.context.outputs.environment }}
         run: ./scripts/deploy.sh ${ENV} budgets
 
   # ----------------------------------------------------------
-  # JOB 4 — Resumen final
+  # JOB 4 - Deploy stacks udabol-* (manual dispatch)
+  # ----------------------------------------------------------
+  deploy-stack:
+    name: '[CD] Deploy ${{ github.event.inputs.stack }} ${{ needs.context.outputs.environment }}'
+    needs: context
+    runs-on: ubuntu-latest
+    environment: ${{ needs.context.outputs.environment }}
+    if: |
+      github.event_name == 'workflow_dispatch' && (
+        github.event.inputs.stack == 'nat-instance' ||
+        github.event.inputs.stack == 'vpc-endpoints' ||
+        github.event.inputs.stack == 'ecs-cluster' ||
+        github.event.inputs.stack == 'ecs-services' ||
+        github.event.inputs.stack == 'ecr' ||
+        github.event.inputs.stack == 'rds' ||
+        github.event.inputs.stack == 'whatsapp-gateway'
+      )
+    steps:
+      - name: '[CD-INI-301] Checkout'
+        uses: actions/checkout@v6
+      - name: '[CD-SET-302] Configure AWS via OIDC'
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ needs.context.outputs.role_arn }}
+          role-session-name: iaapp-deploy-stack-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: '[CD-SET-303] Verify identity'
+        run: aws sts get-caller-identity
+      - name: '[CD-DEP-304] Deploy ${{ github.event.inputs.stack }}'
+        env:
+          ENV: ${{ needs.context.outputs.environment }}
+          STACK: ${{ github.event.inputs.stack }}
+        run: |
+          echo "[CD-DEP-304] Deploying ${STACK} to ${ENV} (account ${{ needs.context.outputs.account_id }})"
+          ./scripts/deploy.sh ${ENV} ${STACK}
+
+  # ----------------------------------------------------------
+  # JOB 5 - Resumen final
   # ----------------------------------------------------------
   summary:
     name: '[CD] Summary'
-    needs: [context, deploy-vpc]
+    needs: [context, deploy-vpc, deploy-stack]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: '[CD-FIN-301] Print summary'
+      - name: '[CD-FIN-401] Print summary'
         run: |
           echo "================================================"
-          echo "  iaapp — Deploy Non-Production"
+          echo "  iaapp - Deploy Non-Production"
           echo "================================================"
           echo "  Environment:  ${{ needs.context.outputs.environment }}"
           echo "  Account:      ${{ needs.context.outputs.account_id }}"
+          echo "  Stack:        ${{ github.event.inputs.stack || 'vpc (auto)' }}"
           echo "  VPC deploy:   ${{ needs.deploy-vpc.result }}"
+          echo "  Stack deploy: ${{ needs.deploy-stack.result }}"
           echo "  Triggered by: ${{ github.actor }}"
           echo "  Commit:       ${{ github.sha }}"
           echo "================================================"

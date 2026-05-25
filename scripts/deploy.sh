@@ -3,7 +3,7 @@
 # iaapp — UDABOL — scripts/deploy.sh
 #
 # Wrapper sobre `aws cloudformation deploy` que:
-#   - Aplica el naming convention iaapp-{stack}-{env}
+#   - Aplica el naming convention del proyecto
 #   - Inyecta los tags obligatorios (Project, Company, Owner, etc.)
 #   - Lee parámetros de parameters/{env}/{stack}.json
 #   - Captura el commit SHA y la fecha en tags
@@ -11,43 +11,71 @@
 # Uso:
 #   ./scripts/deploy.sh <env> <stack>
 #
-# Ejemplo:
-#   ./scripts/deploy.sh dev vpc
-#   ./scripts/deploy.sh qa budgets
+# Stacks soportados:
+#   vpc | budgets | nat-instance | vpc-endpoints
+#   ecs-cluster | ecs-services | ecr | rds
+#   whatsapp-gateway | ecs-services-update
 # ============================================================
 
 set -euo pipefail
 
-# -- Validación de argumentos -----------------------------------
 if [ "$#" -lt 2 ]; then
   echo "Uso: $0 <env> <stack>"
   echo "  env:    dev | qa | prod"
-  echo "  stack:  vpc | budgets | ..."
+  echo "  stack:  vpc | budgets | nat-instance | vpc-endpoints | ecs-cluster | ecs-services | ..."
   exit 1
 fi
 
 ENV="$1"
 STACK="$2"
 
-# -- Constantes del proyecto ------------------------------------
 PROJECT="iaapp"
 COMPANY="udabol"
 OWNER="ayrton.irusta@gmail.com"
-SOW="SOW-001"
+SOW="SOW-002"
 REGION="${AWS_REGION:-us-east-1}"
 
-STACK_NAME="${PROJECT}-${STACK}-${ENV}"
-TEMPLATE_FILE="cloudformation/modules/${STACK}/${STACK}.yaml"
+# -- Mapeo de stacks con naming/template no-estandar -----------
+case "${STACK}" in
+  nat-instance)
+    STACK_NAME="udabol-nat-instance-${ENV}"
+    TEMPLATE_FILE="cloudformation/modules/vpc/nat-instance.yaml"
+    ;;
+  vpc-endpoints)
+    STACK_NAME="udabol-vpc-endpoints-${ENV}"
+    TEMPLATE_FILE="cloudformation/modules/vpc/endpoints.yaml"
+    ;;
+  ecs-cluster)
+    STACK_NAME="udabol-ecs-cluster-${ENV}"
+    TEMPLATE_FILE="cloudformation/modules/ecs/cluster.yaml"
+    ;;
+  ecs-services)
+    STACK_NAME="udabol-ecs-services-${ENV}"
+    TEMPLATE_FILE="cloudformation/modules/ecs/services.yaml"
+    ;;
+  ecr)
+    STACK_NAME="udabol-ecr-${ENV}"
+    TEMPLATE_FILE="cloudformation/modules/ecr/ecr-repos.yaml"
+    ;;
+  rds)
+    STACK_NAME="udabol-rds-${ENV}"
+    TEMPLATE_FILE="cloudformation/modules/rds/rds.yaml"
+    ;;
+  whatsapp-gateway)
+    STACK_NAME="udabol-whatsapp-gateway-${ENV}"
+    TEMPLATE_FILE="cloudformation/modules/lambda/whatsapp-gateway.yaml"
+    ;;
+  *)
+    STACK_NAME="${PROJECT}-${STACK}-${ENV}"
+    TEMPLATE_FILE="cloudformation/modules/${STACK}/${STACK}.yaml"
+    if [ ! -f "${TEMPLATE_FILE}" ] && [ "${STACK}" = "budgets" ]; then
+      TEMPLATE_FILE="budgets/budget-setup.yaml"
+    fi
+    ;;
+esac
+
 PARAMS_FILE="parameters/${ENV}/${STACK}.json"
 
-# Templates en otras ubicaciones (compatibilidad con estructura existente)
-if [ ! -f "${TEMPLATE_FILE}" ]; then
-  if [ "${STACK}" = "budgets" ] && [ -f "budgets/budget-setup.yaml" ]; then
-    TEMPLATE_FILE="budgets/budget-setup.yaml"
-  fi
-fi
-
-# -- Verificación de archivos -----------------------------------
 if [ ! -f "${TEMPLATE_FILE}" ]; then
   echo "ERROR: template no encontrado: ${TEMPLATE_FILE}"
   exit 2
@@ -58,14 +86,12 @@ if [ ! -f "${PARAMS_FILE}" ]; then
   exit 3
 fi
 
-# -- Capturar metadatos del despliegue --------------------------
 SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "manual")
 DATE=$(date -u +%Y-%m-%d)
 TICKET="${TICKET:-${GITHUB_RUN_ID:-manual}}"
 PIPELINE="${GITHUB_ACTIONS:+github-actions}"
 PIPELINE="${PIPELINE:-cli-local}"
 
-# -- Banner -----------------------------------------------------
 echo "=================================================="
 echo "  iaapp — Deploy"
 echo "=================================================="
@@ -79,10 +105,8 @@ echo "  Date:         ${DATE}"
 echo "  Pipeline:     ${PIPELINE}"
 echo "=================================================="
 
-# -- Convertir parameters JSON al formato --parameter-overrides
 PARAMS=$(jq -r '.[] | "\(.ParameterKey)=\(.ParameterValue)"' "${PARAMS_FILE}" | tr '\n' ' ')
 
-# -- Deploy -----------------------------------------------------
 # shellcheck disable=SC2086
 aws cloudformation deploy \
   --template-file "${TEMPLATE_FILE}" \
@@ -100,15 +124,14 @@ aws cloudformation deploy \
     "CommitHash=${SHA}" \
     "DeployDate=${DATE}" \
     "TicketId=${TICKET}" \
-  --capabilities CAPABILITY_NAMED_IAM \
+  --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
   --region "${REGION}" \
   --no-fail-on-empty-changeset
 
 echo ""
-echo "✓ Deploy completado: ${STACK_NAME}"
+echo "Deploy completado: ${STACK_NAME}"
 echo ""
 
-# -- Imprimir outputs -------------------------------------------
 echo "Outputs del stack:"
 aws cloudformation describe-stacks \
   --stack-name "${STACK_NAME}" \
