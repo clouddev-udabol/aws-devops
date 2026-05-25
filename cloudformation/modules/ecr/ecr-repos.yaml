@@ -345,34 +345,34 @@ Outputs:
   RepoCommon:
     Value: !GetAtt RepoCommon.RepositoryUri
     Export:
-      Name: !Sub "ecr-agt-common-uri"
+      Name: "ecr-agt-common-uri"
 
   RepoIntentParserUri:
     Value: !GetAtt RepoIntentParser.RepositoryUri
     Export:
-      Name: !Sub "ecr-agt-intent-parser-uri"
+      Name: "ecr-agt-intent-parser-uri"
 
   RepoWhatsappGatewayUri:
     Value: !GetAtt RepoWhatsappGateway.RepositoryUri
     Export:
-      Name: !Sub "ecr-agt-whatsapp-gateway-uri"
+      Name: "ecr-agt-whatsapp-gateway-uri"
 
   RepoToolApiUri:
     Value: !GetAtt RepoToolApi.RepositoryUri
     Export:
-      Name: !Sub "ecr-agt-toolapi-uri"
+      Name: "ecr-agt-toolapi-uri"
 
   RepoAgentUri:
     Value: !GetAtt RepoAgent.RepositoryUri
     Export:
-      Name: !Sub "ecr-agt-agent-uri"
+      Name: "ecr-agt-agent-uri"
 
   RepoLegacyAdapterUri:
     Value: !GetAtt RepoLegacyAdapter.RepositoryUri
     Export:
-      Name: !Sub "ecr-agt-legacy-adapter-uri"
+      Name: "ecr-agt-legacy-adapter-uri"
 
   RepoReadmodelUri:
     Value: !GetAtt RepoReadmodel.RepositoryUri
     Export:
-      Name: !Sub "ecr-agt-readmodel-uri"
+      Name: "ecr-agt-readmodel-uri"

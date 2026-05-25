@@ -159,7 +159,6 @@ Resources:
   # ── agt-agent ────────────────────────────────────────────────────────────────
   TaskDefAgent:
     Type: AWS::ECS::TaskDefinition
-    DependsOn: LogGroupAgent
     Properties:
       Family: !Sub "agt-agent-${Environment}"
       NetworkMode: awsvpc
@@ -254,7 +253,6 @@ Resources:
   # ── agt-toolapi ──────────────────────────────────────────────────────────────
   TaskDefToolapi:
     Type: AWS::ECS::TaskDefinition
-    DependsOn: LogGroupToolapi
     Properties:
       Family: !Sub "agt-toolapi-${Environment}"
       NetworkMode: awsvpc
@@ -349,7 +347,6 @@ Resources:
   # ── agt-legacy-adapter ───────────────────────────────────────────────────────
   TaskDefLegacyAdapter:
     Type: AWS::ECS::TaskDefinition
-    DependsOn: LogGroupLegacyAdapter
     Properties:
       Family: !Sub "agt-legacy-adapter-${Environment}"
       NetworkMode: awsvpc
@@ -458,16 +455,16 @@ Outputs:
       Name: !Sub "${AWS::StackName}-ServiceLegacyAdapterArn"
 
   AgentEndpoint:
-    Value: !Sub "http://agt-agent.agt.local:8080"
+    Value: "http://agt-agent.agt.local:8080"
     Export:
       Name: !Sub "${AWS::StackName}-AgentEndpoint"
 
   ToolapiEndpoint:
-    Value: !Sub "http://agt-toolapi.agt.local:8080"
+    Value: "http://agt-toolapi.agt.local:8080"
     Export:
       Name: !Sub "${AWS::StackName}-ToolapiEndpoint"
 
   LegacyAdapterEndpoint:
-    Value: !Sub "http://agt-legacy-adapter.agt.local:8080"
+    Value: "http://agt-legacy-adapter.agt.local:8080"
     Export:
       Name: !Sub "${AWS::StackName}-LegacyAdapterEndpoint"
