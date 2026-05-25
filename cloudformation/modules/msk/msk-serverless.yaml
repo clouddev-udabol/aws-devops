@@ -54,13 +54,13 @@ Resources:
           ToPort: 9098
           SourceSecurityGroupId: !ImportValue
             Fn::Sub: '${ClusterStackName}-EcsTaskSgId'
-          Description: ECS tasks => MSK IAM
+          Description: ECS tasks to MSK IAM
         - IpProtocol: tcp
           FromPort: 9098
           ToPort: 9098
           CidrIp: !ImportValue
             Fn::Sub: '${VpcStackName}-VpcCidr'
-          Description: Lambda readmodel => MSK IAM
+          Description: Lambda readmodel to MSK IAM
       SecurityGroupEgress:
         - IpProtocol: '-1'
           CidrIp: '0.0.0.0/0'

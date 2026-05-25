@@ -183,6 +183,20 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
       - name: '[CD-SET-303] Verify identity'
         run: aws sts get-caller-identity
+      - name: '[CD-CLN-303b] Delete ROLLBACK_COMPLETE stack if exists'
+        env:
+          ENV: ${{ needs.context.outputs.environment }}
+          STACK: ${{ github.event.inputs.stack }}
+        run: |
+          STACK_NAME="udabol-${STACK}-${ENV}"
+          STATUS=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "NOEXIST")
+          if [ "${STATUS}" = "ROLLBACK_COMPLETE" ]; then
+            echo "Deleting ROLLBACK_COMPLETE stack: ${STACK_NAME}"
+            aws cloudformation delete-stack --stack-name "${STACK_NAME}"
+            aws cloudformation wait stack-delete-complete --stack-name "${STACK_NAME}"
+          else
+            echo "Stack status: ${STATUS} -- no cleanup needed"
+          fi
       - name: '[CD-DEP-304] Deploy ${{ github.event.inputs.stack }}'
         env:
           ENV: ${{ needs.context.outputs.environment }}
