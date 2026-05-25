@@ -55,36 +55,62 @@ Resources:
         - Key: Proyecto
           Value: udabol-erp-agent
 
+  # ── Launch Template — TagSpecifications para cumplir SCP p-lgafaevf ─────────────
+  # El SCP requiere tag Entorno en network-interface/* al hacer RunInstances.
+  # AWS::EC2::Instance.Tags solo tagea la instancia; el ENI implícito queda sin tag.
+  # TagSpecifications en el Launch Template propaga el tag al ENI en el mismo RunInstances.
+  NatLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub "udabol-nat-lt-${Environment}"
+      LaunchTemplateData:
+        InstanceType: !Ref InstanceType
+        ImageId: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}"
+        NetworkInterfaces:
+          - DeviceIndex: 0
+            SubnetId:
+              !ImportValue
+                "Fn::Sub": "${VpcStackName}-PublicSubnetA"
+            Groups:
+              - !Ref NatInstanceSg
+            DeleteOnTermination: true
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub "udabol-nat-${Environment}"
+              - Key: Entorno
+                Value: !Ref Entorno
+              - Key: Proyecto
+                Value: udabol-erp-agent
+          - ResourceType: network-interface
+            Tags:
+              - Key: Entorno
+                Value: !Ref Entorno
+              - Key: Proyecto
+                Value: udabol-erp-agent
+        UserData:
+          Fn::Base64: |
+            #!/bin/bash
+            set -xe
+            dnf install -y iptables iptables-services
+            echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-nat.conf
+            sysctl -p /etc/sysctl.d/99-nat.conf
+            IFACE=$(ip route show default | awk '/default/ {print $5; exit}')
+            iptables -t nat -A POSTROUTING -o "$IFACE" -j MASQUERADE
+            iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+            iptables -A FORWARD -j ACCEPT
+            service iptables save
+            systemctl enable iptables
+
   # ── NAT Instance ──────────────────────────────────────────────────────────────
   NatInstance:
     Type: AWS::EC2::Instance
     Properties:
-      InstanceType: !Ref InstanceType
-      ImageId: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}"
-      SubnetId:
-        !ImportValue
-          "Fn::Sub": "${VpcStackName}-PublicSubnetA"
-      SecurityGroupIds:
-        - !Ref NatInstanceSg
+      LaunchTemplate:
+        LaunchTemplateId: !Ref NatLaunchTemplate
+        Version: !GetAtt NatLaunchTemplate.LatestVersionNumber
       SourceDestCheck: false
-      UserData:
-        Fn::Base64: |
-          #!/bin/bash
-          set -xe
-          # Instalar iptables
-          dnf install -y iptables iptables-services
-          # Habilitar IP forwarding (persistente)
-          echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-nat.conf
-          sysctl -p /etc/sysctl.d/99-nat.conf
-          # Detectar interfaz de salida dinámicamente (eth0 o ens5 según kernel)
-          IFACE=$(ip route show default | awk '/default/ {print $5; exit}')
-          # Reglas NAT MASQUERADE
-          iptables -t nat -A POSTROUTING -o "$IFACE" -j MASQUERADE
-          iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-          iptables -A FORWARD -j ACCEPT
-          # Persistir reglas
-          service iptables save
-          systemctl enable iptables
       Tags:
         - Key: Name
           Value: !Sub "udabol-nat-${Environment}"
