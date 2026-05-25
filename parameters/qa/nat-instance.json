@@ -2,5 +2,5 @@
   { "ParameterKey": "Environment",  "ParameterValue": "qa" },
   { "ParameterKey": "Entorno",      "ParameterValue": "staging" },
   { "ParameterKey": "VpcStackName", "ParameterValue": "iaapp-vpc-qa" },
-  { "ParameterKey": "InstanceType", "ParameterValue": "t4g.nano" }
+  { "ParameterKey": "InstanceType", "ParameterValue": "t4g.micro" }
 ]
