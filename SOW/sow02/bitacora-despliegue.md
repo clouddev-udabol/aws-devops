@@ -12,7 +12,7 @@
 |--------|-----------|-------|-----------|--------------|--------|
 | **A.0** | Bootstrap IAM Identity Center — Permission Set Sprint1Deploy + perfiles proy-dev/proy-qa | 2026-05-22 | 2.0 h | 3.5 h | ✅ COMPLETADO |
 | **A.1** | Estructura 7 repos agt-* (ramas, ci.yml, Makefile, .env.example) | 2026-05-22 | 3.0 h | 2.5 h | ✅ COMPLETADO |
-| **A.2** | Branch protection rules en 7 repos | 2026-05-24 | 1.0 h | 0.5 h | 🔴 BLOQUEADO — plan GitHub Free no permite branch protection en repos privados. Requiere GitHub Team o repos públicos. Decisión pendiente Franz. |
+| **A.2** | Branch protection rules en 7 repos | 2026-05-25 | 1.0 h | 0.5 h | ✅ COMPLETADO — GitHub Team activado. main+qa protegidas en 7 repos (1 revisor, no force push, no delete). |
 | **A.3** | Deploy 14 repos ECR (DEV + QA vía CFN) | 2026-05-22 | 2.0 h | 0.5 h | ✅ COMPLETADO |
 | **A.4** | Pipeline piloto CI/CD en agt-agent y agt-toolapi | 2026-05-22 | 3.0 h | 4.0 h | ✅ COMPLETADO |
 | **B.1** | CloudFormation Lex V2 Bot + generate_template.py + intents YAML | 2026-05-23 | 8.0 h | 4.0 h | ✅ COMPLETADO |
@@ -435,7 +435,7 @@ RdsStubSubnetCidr: 10.20.22.0/28
 | ~~N2~~ | ~~CloudWatch vs Vector+Prometheus+Grafana~~ | Franz | ✅ **RESUELTO** — SOW-002 §2.6 define **OTel Collector + CloudWatch/X-Ray** como default DEV/QA; E7 dashboard diferido a Sprint 2 | E.1 |
 | ~~N3~~ | ~~VPC Single-AZ confirmada~~ | Franz | ✅ **RESUELTO** — SOW-002 §2.2 coloca NAT GW en us-east-1a únicamente → single-AZ confirmado para DEV/QA | C.0 ALB |
 | ~~N4~~ | ~~NAT Gateway en DEV/QA~~ | Franz | ✅ **RESUELTO** — SOW-002 §2.2 lo incluye expresamente en alcance (D.4) | D.4 |
-| A2 | Branch protection requiere **GitHub Team** ($4/usr/mes) o repos públicos — plan Free bloquea la API para repos privados (HTTP 403). Token `clouddev-udabol` con `admin:org`+`repo` verificado y funcional. Decisión pendiente de Franz/Dockweiler. | Franz | 🔴 Bloqueado — pendiente decisión de plan | A.2 / E1 |
+| ~~A2~~ | ~~Branch protection~~ | — | ✅ **RESUELTO** — GitHub Team activado 2026-05-25. main+qa protegidas 7 repos. | — |
 | **OBS-014** | SCP `p-lgafaevf` bloquea `ec2:RunInstances` en `security-group/*` via `aws:RequestTag/Entorno`. Los SGs son recursos pre-existentes — no admiten `RequestTag` en RunInstances. El SCP debe cambiar `aws:RequestTag` → `aws:ResourceTag` para el recurso `security-group/*`. **Franz debe corregir el SCP** antes de que se puedan crear EC2 instances en las cuentas DEV/QA. ECS Fargate NO afectado (usa `ecs:RunTask`, no `ec2:RunInstances`). | Franz | 🔴 Bloqueado — requiere corrección SCP | D.4 NAT Instance |
 | D4 | Dockerfiles funcionales en 7 repos | Carlos/Devs | ❓ Pendiente | C.2, E.3 |
 | D3 | .env.example con valores reales | Carlos/Devs | ❓ Pendiente | C.2, D.2 |

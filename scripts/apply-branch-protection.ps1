@@ -1,58 +1,16 @@
 # =============================================================
 # apply-branch-protection.ps1
-# SOW-002 Entregable E1 — Branch protection 7 repos agt-*
-# Org: clouddev-udabol
-# Ramas protegidas: main, qa  |  Sin protección: dev
-# =============================================================
-# USO:
-#   $env:GH_TOKEN = "ghp_XXXXXXXXXX"
-#   .\scripts\apply-branch-protection.ps1
+# SOW-002 Entregable E1 - Branch protection 7 repos agt-*
+# Org: clouddev-udabol  |  Ramas: main, qa
 # =============================================================
 
-$ORG     = "clouddev-udabol"
-$REPOS   = @(
-    "agt-agent",
-    "agt-toolapi",
-    "agt-intent-parser",
-    "agt-legacy-adapter",
-    "agt-whatsapp-gateway",
-    "agt-readmodel",
-    "agt-common"
-)
-$BRANCHES = @("main", "qa")
+$ORG      = "clouddev-udabol"
+$REPOS    = @("agt-agent","agt-toolapi","agt-intent-parser","agt-legacy-adapter","agt-whatsapp-gateway","agt-readmodel","agt-common")
+$BRANCHES = @("main","qa")
 
-# Verificar que gh CLI está autenticado
-$authCheck = gh auth status 2>&1
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "gh CLI no autenticado. Ejecutar: `$env:GH_TOKEN = 'ghp_...'"
-    exit 1
-}
-Write-Host "gh CLI autenticado OK" -ForegroundColor Green
-
-# Body de protección según SOW-002 §2.1:
-#   - PR obligatorio con 1 revisor
-#   - Status checks CI (Lint + Unit Tests) en modo estricto
-#   - No force push, no deletions
-$bodyJson = @'
-{
-  "required_status_checks": {
-    "strict": true,
-    "contexts": ["Lint", "Unit Tests"]
-  },
-  "enforce_admins": false,
-  "required_pull_request_reviews": {
-    "dismiss_stale_reviews": false,
-    "require_code_owner_reviews": false,
-    "required_approving_review_count": 1
-  },
-  "restrictions": null,
-  "allow_force_pushes": false,
-  "allow_deletions": false
-}
-'@
-
-$tmpFile = [System.IO.Path]::GetTempFileName() + ".json"
-$bodyJson | Out-File -FilePath $tmpFile -Encoding utf8NoBOM
+gh auth status 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Error "gh CLI no autenticado"; exit 1 }
+Write-Host "gh CLI OK - $($env:GH_TOKEN.Substring(0,8))..." -ForegroundColor Green
 
 $errors = @()
 
@@ -60,60 +18,63 @@ foreach ($repo in $REPOS) {
     foreach ($branch in $BRANCHES) {
         Write-Host "`n[$repo @ $branch]" -ForegroundColor Cyan -NoNewline
 
-        # Verificar que la rama existe antes de intentar protegerla
-        $branchCheck = gh api "repos/$ORG/$repo/branches/$branch" 2>&1
+        # Verificar que la rama existe
+        gh api "repos/$ORG/$repo/branches/$branch" 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
-            Write-Host " ⚠️  rama no encontrada — SALTANDO" -ForegroundColor Yellow
-            $errors += "$repo @ $branch — rama no existe"
+            Write-Host " SKIP - rama no encontrada" -ForegroundColor Yellow
+            $errors += "$repo @ $branch - rama no existe"
             continue
         }
 
+        # Aplicar proteccion via gh api con campos individuales
         gh api "repos/$ORG/$repo/branches/$branch/protection" `
             --method PUT `
-            --input $tmpFile | Out-Null
+            --header "Accept: application/vnd.github+json" `
+            -F "required_status_checks[strict]=true" `
+            -f "required_status_checks[contexts][]=Lint" `
+            -f "required_status_checks[contexts][]=Unit Tests" `
+            -F "enforce_admins=false" `
+            -F "required_pull_request_reviews[required_approving_review_count]=1" `
+            -F "required_pull_request_reviews[dismiss_stale_reviews]=false" `
+            -F "required_pull_request_reviews[require_code_owner_reviews]=false" `
+            -F "allow_force_pushes=false" `
+            -F "allow_deletions=false" `
+            -F "restrictions=null" 2>&1 | Out-Null
 
         if ($LASTEXITCODE -eq 0) {
-            Write-Host " ✅ protección aplicada" -ForegroundColor Green
+            Write-Host " OK" -ForegroundColor Green
         } else {
-            Write-Host " ❌ ERROR" -ForegroundColor Red
-            $errors += "$repo @ $branch — fallo al aplicar protección"
+            Write-Host " ERROR" -ForegroundColor Red
+            $errors += "$repo @ $branch - fallo"
         }
     }
 }
 
-Remove-Item $tmpFile -ErrorAction SilentlyContinue
-
-# ---- Verificación final ----
-Write-Host "`n===== VERIFICACIÓN E1 =====" -ForegroundColor Magenta
-
+# Verificacion final
+Write-Host "`n===== VERIFICACION E1 =====" -ForegroundColor Magenta
 $results = @()
 foreach ($repo in $REPOS) {
     foreach ($branch in $BRANCHES) {
-        $count = gh api "repos/$ORG/$repo/branches/$branch/protection" `
-            --jq '.required_pull_request_reviews.required_approving_review_count' 2>$null
-        $fp    = gh api "repos/$ORG/$repo/branches/$branch/protection" `
-            --jq '.allow_force_pushes.enabled' 2>$null
-        $del   = gh api "repos/$ORG/$repo/branches/$branch/protection" `
-            --jq '.allow_deletions.enabled' 2>$null
-
-        $ok = ($count -eq "1") -and ($fp -eq "false") -and ($del -eq "false")
-        $icon = if ($ok) { "✅" } else { "❌" }
+        $data  = gh api "repos/$ORG/$repo/branches/$branch/protection" 2>$null | ConvertFrom-Json
+        $count = if ($data) { $data.required_pull_request_reviews.required_approving_review_count } else { $null }
+        $fp    = if ($data) { $data.allow_force_pushes.enabled } else { $null }
+        $del   = if ($data) { $data.allow_deletions.enabled } else { $null }
+        $ok    = ($count -eq 1) -and ($fp -eq $false) -and ($del -eq $false)
         $results += [PSCustomObject]@{
-            Repo     = $repo
-            Rama     = $branch
+            Repo      = $repo
+            Rama      = $branch
             Revisores = $count
             ForcePush = $fp
             Borrado   = $del
-            Estado    = $icon
+            Estado    = if ($ok) { "OK" } else { "FAIL" }
         }
     }
 }
-
 $results | Format-Table -AutoSize
 
-if ($errors.Count -gt 0) {
-    Write-Host "`nProblemas encontrados:" -ForegroundColor Red
-    $errors | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
+if ($errors.Count -eq 0) {
+    Write-Host "Entregable E1 completado OK" -ForegroundColor Green
 } else {
-    Write-Host "`nEntregable E1 completado — branch protection activa en $($REPOS.Count) repos x $($BRANCHES.Count) ramas" -ForegroundColor Green
+    Write-Host "Errores:" -ForegroundColor Red
+    $errors | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
 }
