@@ -190,7 +190,13 @@ jobs:
         run: |
           echo "[CD-DEP-304] Deploying ${STACK} to ${ENV} (account ${{ needs.context.outputs.account_id }})"
           ./scripts/deploy.sh ${ENV} ${STACK}
-
+      - name: '[CD-DGB-305] Stack events on failure'
+        if: failure()
+        env:
+          ENV: ${{ needs.context.outputs.environment }}
+          STACK: ${{ github.event.inputs.stack }}
+        run: |
+          aws cloudformation describe-stack-events --stack-name "udabol-${STACK}-${ENV}" --region us-east-1 --query 'StackEvents[?ResourceStatus==`CREATE_FAILED`].[LogicalResourceId,ResourceStatusReason]' --output table 2>&1 || true
   # ----------------------------------------------------------
   # JOB 5 - Resumen final
   # ----------------------------------------------------------
