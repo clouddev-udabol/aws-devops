@@ -22,16 +22,17 @@
 | **C.2** | ECS Services: agt-agent, agt-toolapi, agt-legacy-adapter | 2026-05-23 | 6.0 h | 5.0 h | ✅ COMPLETADO |
 | **C.3** | Validación ECS: describe-services running=desiredCount | 2026-05-23 | 1.0 h | 0.5 h | ✅ COMPLETADO |
 | **D.1** | RDS PostgreSQL 16 + Secrets Manager + rotación 30d | 2026-05-23 | 5.0 h | 4.5 h | ✅ COMPLETADO (DEV + QA) |
-| **D.2** | MSK Serverless DEV + QA + 3 topics (enrollment.events, payment.events, query.audit) | — | 6.0 h | — | ⬜ PENDIENTE (N1 resuelto por SOW-002 §2.5) |
-| **D.3** | Lambda agt-readmodel + event source mapping a MSK | — | 2.0 h | — | ⬜ PENDIENTE (depende D.2) |
-| **D.4** | NAT Instance t4g.nano + VPC Endpoints (ECR, Logs, SM, Lex) + mover ECS a PrivateSubnet — cierra ISS-003 | 2026-05-25 | 5.0 h | 6.0 h | 🟡 PARCIAL — VPC Endpoints ✅ DEV live · NAT Instance ❌ bloqueado SCP (ver OBS-014) |
-| **E.1** | OTel Collector ECS task + config.yaml (backend CloudWatch + X-Ray) | — | 9.0 h | — | ⬜ PENDIENTE (N2 resuelto por SOW-002 §2.6) |
+| **D.2** | MSK Serverless DEV + QA + 3 topics (enrollment.events, payment.events, query.audit) | 2026-05-25 | 6.0 h | 3.0 h | ✅ COMPLETADO — `udabol-msk-dev/qa` CREATE_COMPLETE · SASL/IAM puerto 9098 |
+| **D.3** | ECS Fargate service agt-readmodel (corregido SOW §2.3: ECS, no Lambda) | 2026-05-25 | 2.0 h | 2.5 h | ✅ COMPLETADO — `udabol-ecs-services-dev/qa` UPDATE_COMPLETE · ServiceReadmodel ACTIVE desiredCount=0 (sin imagen ECR aún) |
+| **D.4** | NAT Instance t4g.nano + VPC Endpoints (ECR, Logs, SM, Lex) + mover ECS a PrivateSubnet — cierra ISS-003 | 2026-05-25 | 5.0 h | 8.0 h | ✅ COMPLETADO — VPC Endpoints ✅ DEV+QA · NAT Instance ✅ DEV+QA · SCP OBS-014 corregido via fdac-cloudadmin |
+| **C.2-FIX** | ISS-003 resolución completa — IAM inline policy GHA roles + NACL ephemeral ports + ECS circuit breaker reset + redeploy ecs-services DEV+QA a AppSubnetA | 2026-05-25 | 2.0 h | 6.5 h | ✅ COMPLETADO — 3 DEV + 3 QA RUNNING en AppSubnetA (10.10.11.x / 10.20.11.x). Commits f67922a (vpc.yaml) · 01db864 (endpoints.yaml) |
+| **E.1** | OTel Collector ECS task + config.yaml (backend CloudWatch + X-Ray) | 2026-05-25 | 9.0 h | 2.0 h | 🔄 EN PROGRESO — template+params commiteados (`1e47439`), deploy pendiente (TECH-001) |
 | **E.2** | OTel SDK Python en 7 repos agt-* (requirements.txt + bootstrap main.py) | — | 6.0 h | — | ⬜ PENDIENTE (depende E.1) |
 | **E.3** | Smoke test end-to-end + documentación de evidencia | — | 4.0 h | — | ⏳ Bloqueado D6 (credenciales Twilio) |
 | **E.4** | Runbook sprint1-deploy.md | 2026-05-23 | 3.0 h | 1.5 h | ✅ COMPLETADO |
 | — | **Total presupuestado** | — | **80.0 h** | — | — |
-| — | **Acumulado real** | — | — | **32.5 h** | — |
-| — | **Saldo disponible** | — | — | **47.5 h** | — |
+| — | **Acumulado real** | — | — | **54.5 h** | — |
+| — | **Saldo disponible** | — | — | **25.5 h** | — |
 
 ---
 
@@ -414,6 +415,188 @@ RdsStubSubnetCidr: 10.20.22.0/28
 
 ---
 
+## D.2 — MSK Serverless DEV + QA (EN PROGRESO)
+
+**Fecha inicio:** 2026-05-25
+**Horas reales:** en curso
+**Estado:** ✅ COMPLETADO — DEV + QA CREATE_COMPLETE
+**Horas reales:** ~3.0 h
+
+### Qué se implementó
+
+**Template:** `cloudformation/modules/msk/msk-serverless.yaml`
+
+- `AWS::MSK::ServerlessCluster` — auth SASL/IAM, puerto 9098
+- `MskStubSubnet` — `/28` en `us-east-1b` para satisfacer requisito multi-AZ (mismo patrón que RDS D.1)
+  - DEV: `10.10.23.0/28` | QA: `10.20.23.0/28`
+- `MskSecurityGroup` — inbound 9098 desde `EcsTaskSgId` + VPC CIDR (Lambda readmodel)
+- IAM Task Role en `services.yaml` extendido con política `MskKafkaAccess`:
+  - `kafka-cluster:Connect/DescribeCluster/AlterCluster`
+  - `kafka-cluster:DescribeTopic/CreateTopic/WriteData/ReadData`
+  - `kafka-cluster:AlterGroup/DescribeGroup`
+
+**Parámetros:** `parameters/dev/msk.json` · `parameters/qa/msk.json`
+
+**Stack names:** `udabol-msk-dev` / `udabol-msk-qa`
+
+### Recursos live
+
+| Recurso | DEV | QA |
+|---------|-----|-----|
+| `udabol-msk-dev/qa` | ✅ CREATE_COMPLETE | ✅ CREATE_COMPLETE |
+| MSK Cluster ARN | `…:cluster/udabol-dev/fa6017fd-c8a6-43a3-b73f-404ec40a6a65-s1` | `…:cluster/udabol-qa/20451623-032d-4c74-bd7a-e44bd9f23561-s1` |
+| MskStubSubnet CIDR | `10.10.23.0/28` us-east-1b | `10.20.23.0/28` us-east-1b |
+| MskStubSubnet ID | — | `subnet-057afe77732491cac` |
+
+### Lecciones de D.2
+
+- **OBS-017 — SG rule Description no acepta `>`:** EC2 valida los chars en `Description` de reglas SG: solo `a-zA-Z0-9. _-:/()#,@[]+=&;{}!$*`. El carácter `>` (usado en `ECS tasks => MSK`) rechaza la creación del SG con `ValidationError`. Fix: reemplazar `=>` por `to`.
+- **OBS-018 — ROLLBACK_COMPLETE bloquea redeploy:** `aws cloudformation deploy` falla con exit 254 si el stack está en `ROLLBACK_COMPLETE`. Fix: step `CD-CLN-303b` en el workflow elimina el stack pre-existente antes del deploy.
+
+---
+
+## D.3 — ECS Service agt-readmodel (COMPLETADO)
+
+**Fecha:** 2026-05-25
+**Horas reales:** ~2.5 h
+**Commits:** `52186eb` (feat), `43658d5` (fix ReadmodelDesiredCount)
+
+### Qué se hizo
+
+1. **Corrección arquitectural**: el SOW-002 §2.3 especifica `agt-readmodel` como servicio ECS Fargate (256 CPU / 512 MB), no Lambda. El plan interno PLAN-DESPLIEGUE tenía un error de diseño ("Lambda agt-readmodel"). Se corrigió siguiendo el documento contractual.
+
+2. **Template `cloudformation/modules/ecs/services.yaml`** actualizado:
+   - Parámetro `ImageAgtReadmodel` + `ReadmodelDesiredCount` (default 0)
+   - `LogGroupReadmodel` → `/agt/agt-readmodel/{env}` retención 14d/30d
+   - `TaskDefReadmodel` (port 8085, health check `/v1/healthz`, READMODEL_MODE=mock)
+   - `SdReadmodel` → Cloud Map `agt-readmodel.agt.local`
+   - `ServiceReadmodel` → AppSubnetA, EcsTaskSgId, desiredCount=ReadmodelDesiredCount
+   - Outputs: `ServiceReadmodelArn`, `ReadmodelEndpoint`
+
+3. **`ReadmodelDesiredCount=0`**: servicio creado sin lanzar tasks. La imagen en ECR `agt-readmodel` está vacía — el dev team push la imagen cuando el código esté listo, y luego se actualiza el parámetro a 1/2.
+
+4. **OBS-023 — IAMForECSRoles en GHA roles** (via cloudadmin — excepción justificada):
+   - `proy-app-gha-role-development` y `proy-app-gha-role-qa` necesitan `iam:TagRole`, `iam:UntagRole`, `iam:PutRolePolicy`, `iam:DeleteRolePolicy` para actualizar `agt-ecs-*` roles cuando CloudFormation propaga tags de stack.
+   - Inline policy `IAMForECSRoles` aplicada en DEV (`245650696072`) y QA (`493735739951`).
+
+### Estado final DEV
+
+| Recurso | Estado |
+|---|---|
+| Stack `udabol-ecs-services-dev` | UPDATE_COMPLETE |
+| Service `agt-readmodel-dev` | ACTIVE, desired=0, running=0 |
+| Cloud Map `agt-readmodel.agt.local` | registrado |
+| Export `ReadmodelEndpoint` | `http://agt-readmodel.agt.local:8085` |
+
+### Observaciones
+
+**OBS-023** — `IAMForECSRoles` inline policy faltaba en GHA roles DEV+QA. CloudFormation propaga tags de stack-level (`CommitHash`, `DeployDate`) a TODOS los recursos incluyendo IAM roles, lo que requiere `iam:TagRole`/`iam:UntagRole`. Adicionalmente, los inline policies de los roles requieren `iam:PutRolePolicy`/`iam:DeleteRolePolicy`. Sin esta policy, cada update del stack `ecs-services` falla. Fix: `aws iam put-role-policy IAMForECSRoles` via cloudadmin, scoped a `agt-ecs-*`.
+
+---
+
+## D.4 — NAT Instance + VPC Endpoints (COMPLETADO)
+
+**Fecha:** 2026-05-25
+**Horas reales:** ~8.0 h (estimado 5.0 h — ver OBS-014, OBS-015, OBS-016)
+
+### Qué se desplegó
+
+**Templates:**
+- `cloudformation/modules/vpc/endpoints.yaml` — 6 Interface/Gateway Endpoints
+- `cloudformation/modules/vpc/nat-instance.yaml` — EC2 t4g.nano Graviton + ENI pre-creada
+
+| Recurso | DEV | QA |
+|---------|-----|-----|
+| `udabol-vpc-endpoints-dev/qa` | ✅ CREATE_COMPLETE | ✅ CREATE_COMPLETE |
+| `udabol-nat-instance-dev/qa` | ✅ `i-00b970c329cab457f` (10.10.1.246) | ✅ via GitHub Actions |
+| VPC Endpoint ECR API | `vpce-*` ✅ | ✅ |
+| VPC Endpoint ECR DKR | `vpce-*` ✅ | ✅ |
+| VPC Endpoint S3 (Gateway) | ✅ gratis | ✅ |
+| VPC Endpoint CloudWatch Logs | ✅ | ✅ |
+| VPC Endpoint Secrets Manager | ✅ | ✅ |
+| VPC Endpoint Lex V2 Runtime | ✅ | ✅ |
+
+### Fix SCP OBS-014 — ejecutado con `fdac-cloudadmin`
+
+Los SCPs `p-lgafaevf` (DEV OU) y `p-k7ywnh7g` (QA OU) tenían dos bugs:
+
+1. `DenyNoEntorno` con `Resource: "*"` incluía `security-group/*` y `network-interface/*`, que son recursos **pre-existentes** y no admiten `aws:RequestTag` en `ec2:RunInstances`.
+2. `DenyWrongEntorno` solo permitía un único valor (`"desarrollo"` o `"staging"`) en lugar del array `["desarrollo","staging","produccion"]`.
+
+**Fix aplicado:**
+```
+DenyNoEntorno  → partido en DenyNoEntornoGeneral (sin EC2) + DenyNoEntornoEC2 (solo instance/* y volume/*)
+DenyWrongEntorno → condicion: StringNotEquals + array 3 valores + Null:false (evita doble deny)
+```
+
+Archivos: `policies/scp-p-lgafaevf-fix.json`, `policies/scp-p-k7ywnh7g-fix.json`
+
+### Lecciones D.4
+
+- **OBS-014 (RESUELTO):** `aws:RequestTag` en RunInstances solo aplica a recursos *creados en ese request* (instance, volume, nuevas ENIs). SGs y ENIs pre-existentes referenciados en RunInstances no admiten RequestTag → bloqueo. Fix: acotar el deny a `instance/*` y `volume/*` exclusivamente.
+- **OBS-015:** El service name de Lex V2 VPC Endpoint es `com.amazonaws.{region}.runtime-v2-lex` (no `lex.runtime` ni `runtime.lex.v2`). Verificar siempre con `aws ec2 describe-vpc-endpoint-services --filters Name=service-name,Values=*lex*`.
+- **OBS-016:** Stack en `ROLLBACK_COMPLETE` debe eliminarse antes de re-desplegar. CFN no permite update sobre un stack en estado ROLLBACK_COMPLETE.
+- **Regla Git:** Todos los commits del repo `clouddev-udabol/aws-devops` deben usar `ayrton.irusta@gmail.com`. El historial fue reescrito el 2026-05-25 via `git filter-branch` para eliminar todos los registros de `ayrton.irusta@blockfinityadvisors.com`.
+
+---
+
+## C.2-FIX — ISS-003: ECS tasks en AppSubnetA (COMPLETADO)
+
+**Fecha:** 2026-05-25
+**Horas reales:** ~6.5 h (estimado 2.0 h — ver OBS-019 a OBS-022)
+
+### Contexto
+
+D.4 desplegó NAT Instance + VPC Endpoints y actualizó `services.yaml` para mover las ECS tasks a AppSubnetA (`AssignPublicIp: DISABLED`). Sin embargo, el redeploy del stack `udabol-ecs-services-dev/qa` falló en tres rondas consecutivas por tres causas independientes que debieron resolverse secuencialmente.
+
+### Secuencia de fallos y resolución
+
+#### Fallo 1 — IAM: permisos insuficientes en el rol GHA
+
+**Error:** `iam:DeleteRolePolicy / iam:TagRole / iam:UntagRole / iam:PutRolePolicy` denegado sobre `agt-ecs-task-dev` y `agt-ecs-exec-dev`.
+
+**Causa:** El inline policy `IAMForVPCFlowLogs` en `proy-app-gha-role-development/qa` tenía como `Resource` solo los roles de VPC Flow Logs (`role-vpc-flowlogs-*`). Los roles ECS (`agt-ecs-*`) no estaban incluidos. El stack `github-oidc-iaapp-dev` está en `ROLLBACK_COMPLETE` — no puede actualizarse vía CFN.
+
+**Solución (cloudadmin — excepción aprobada):** `aws iam put-role-policy` directamente sobre ambos roles GHA, ampliando `Resource` con `arn:aws:iam::ACCOUNT:role/agt-ecs-*` y agregando las acciones faltantes (`DeleteRolePolicy`, `TagRole`, `UntagRole`, `PutRolePolicy`). Ver OBS-019.
+
+#### Fallo 2 — ECS Deployment Circuit Breaker trabado
+
+**Error:** `ECS Deployment Circuit Breaker was triggered` — el stack esperaba estabilización del servicio indefinidamente. `udabol-ecs-services-dev` quedó en `UPDATE_ROLLBACK_FAILED`.
+
+**Causa:** Tres fallos consecutivos de tareas activaron el circuit breaker. ECS dejó de reintentar. CFN no puede avanzar ni hacer rollback sin que el servicio estabilice.
+
+**Solución (cloudadmin — excepción aprobada):** `aws ecs update-service --force-new-deployment` en los 6 servicios (3 DEV + 3 QA). Todos alcanzaron `RolloutState: COMPLETED`. Stack desbloqueado con `continue-update-rollback`. Ver OBS-020.
+
+#### Fallo 3 — NACL AppSubnetA bloqueaba retorno de S3 (causa raíz de ISS-003)
+
+**Error:** `CannotPullContainerError: dial tcp 52.216.51.58:443: i/o timeout` — tasks en AppSubnetA no podían descargar capas de imagen ECR.
+
+**Diagnóstico:** El endpoint ECR DKR (`vpce-0e6fd1b6f18d21500`) con `PrivateDnsEnabled: true` resuelve `*.dkr.ecr.us-east-1.amazonaws.com` al ENI privado (`10.10.1.254`) correctamente. Sin embargo, ECR DKR redirige los blobs de capas a **S3 presigned URLs**. El tráfico a S3 va por el S3 Gateway Endpoint (route table `pl-63a5400a` → `vpce-0446b0f3915e62f2a`). El tráfico de **retorno de S3** llega desde IPs públicas de S3 (`52.216.51.58`, `16.15.191.109`). La regla NACL `NaclAppInboundFromPublic` (Rule 100) tenía `CidrBlock: VpcCidr (10.10.0.0/16)` — las IPs públicas de S3 caían en el `deny all` por defecto.
+
+**Solución (vía GitHub Actions):** Actualizado `cloudformation/modules/vpc/vpc.yaml` — Rule 100 cambiada de `CidrBlock: !Ref VpcCidr` a `CidrBlock: "0.0.0.0/0"`. Seguro: AppSubnetA no tiene ruta a IGW, ningún host externo puede iniciar conexiones hacia esa subred. Commit `f67922a`. Ver OBS-021, OBS-022.
+
+**Nota adicional:** Durante el diagnóstico se movieron los endpoints de AppSubnetA a PublicSubnetA (commit `01db864`) para co-locarlos con las tasks. Aunque la causa raíz era el NACL, este cambio permanece porque reduce la latencia intra-subnet.
+
+### Recursos live post-resolución
+
+| Recurso | DEV | QA |
+|---------|-----|-----|
+| `udabol-ecs-services-dev/qa` | ✅ UPDATE_COMPLETE | ✅ UPDATE_COMPLETE |
+| `agt-agent` subnet | AppSubnetA `10.10.11.23` | AppSubnetA `10.20.11.96` / `10.20.11.238` |
+| `agt-toolapi` subnet | AppSubnetA `10.10.11.200` | AppSubnetA `10.20.11.119` / `10.20.11.186` |
+| `agt-legacy-adapter` subnet | AppSubnetA `10.10.11.204` | AppSubnetA `10.20.11.173` / `10.20.11.92` |
+| Endpoints ENI (ECR/Logs/SM/Lex) | PublicSubnetA `10.10.1.x` | PublicSubnetA `10.20.1.x` |
+| NACL Rule 100 CidrBlock | `0.0.0.0/0` (antes VpcCidr) | `0.0.0.0/0` (antes VpcCidr) |
+
+### Observaciones C.2-FIX
+
+- **OBS-019 — IAM en roles GHA pre-existentes con CFN en ROLLBACK_COMPLETE:** Cuando el stack `github-oidc-iaapp-dev` está en `ROLLBACK_COMPLETE`, no se puede actualizar el inline policy vía CFN. La única vía es `aws iam put-role-policy` directamente con `cloudadmin`. Esta operación es una excepción permitida (IAM/seguridad) según la regla de uso de cuentas. Siempre notificar al usuario antes de ejecutar. El template `iam-role.yaml` fue actualizado igualmente para mantener IaC consistente (commit `df5bfd2`), aunque el stack CFN no puede aplicarlo.
+- **OBS-020 — ECS Deployment Circuit Breaker deadlock con CFN:** Cuando el circuit breaker se activa y CFN espera estabilización del servicio, el stack queda atrapado indefinidamente. Secuencia de escape: (1) identificar el ECS service en estado `RolloutState: FAILED`; (2) ejecutar `aws ecs update-service --force-new-deployment --cluster CLUSTER --service SERVICE`; (3) esperar `RolloutState: COMPLETED`; (4) si el stack queda en `UPDATE_ROLLBACK_FAILED`, ejecutar `aws cloudformation continue-update-rollback`. Solo proceder con el siguiente deploy cuando el stack esté en `UPDATE_ROLLBACK_COMPLETE`.
+- **OBS-021 — S3 Gateway Endpoint y NACL: retorno desde IPs públicas:** El S3 Gateway Endpoint enruta el tráfico saliente via prefijo `pl-63a5400a` (IPs de S3), pero el tráfico de **retorno** llega desde las IPs públicas de S3 directamente (no desde dentro del VPC). Las reglas NACL deben permitir TCP 1024-65535 desde `0.0.0.0/0` (no solo desde VpcCidr) en la subnet privada para que las respuestas S3 puedan entrar.
+- **OBS-022 — ECR image pull en Fargate usa S3 para capas:** ECR DKR maneja la autenticación y el manifest vía el VPC Endpoint (DNS privado → ENI). Sin embargo, los blobs de capas (`/v2/{name}/blobs/{digest}`) son redirigidos a **S3 presigned URLs** por ECR. Para que el pull sea completo se necesitan tanto el ECR DKR endpoint como acceso a S3 (via Gateway Endpoint o NAT). La NACL debe permitir retorno desde IPs públicas de S3.
+
+---
+
 ## Registro de sesiones SSO activas
 
 | Sesión | URL | Usuario | Expira |
@@ -436,7 +619,7 @@ RdsStubSubnetCidr: 10.20.22.0/28
 | ~~N3~~ | ~~VPC Single-AZ confirmada~~ | Franz | ✅ **RESUELTO** — SOW-002 §2.2 coloca NAT GW en us-east-1a únicamente → single-AZ confirmado para DEV/QA | C.0 ALB |
 | ~~N4~~ | ~~NAT Gateway en DEV/QA~~ | Franz | ✅ **RESUELTO** — SOW-002 §2.2 lo incluye expresamente en alcance (D.4) | D.4 |
 | ~~A2~~ | ~~Branch protection~~ | — | ✅ **RESUELTO** — GitHub Team activado 2026-05-25. main+qa protegidas 7 repos. | — |
-| **OBS-014** | SCP `p-lgafaevf` bloquea `ec2:RunInstances` en `security-group/*` via `aws:RequestTag/Entorno`. Los SGs son recursos pre-existentes — no admiten `RequestTag` en RunInstances. El SCP debe cambiar `aws:RequestTag` → `aws:ResourceTag` para el recurso `security-group/*`. **Franz debe corregir el SCP** antes de que se puedan crear EC2 instances en las cuentas DEV/QA. ECS Fargate NO afectado (usa `ecs:RunTask`, no `ec2:RunInstances`). | Franz | 🔴 Bloqueado — requiere corrección SCP | D.4 NAT Instance |
+| ~~OBS-014~~ | ~~SCP `p-lgafaevf`/`p-k7ywnh7g` bloqueaba `ec2:RunInstances` en `security-group/*` via `aws:RequestTag/Entorno`~~ | fdac-cloudadmin | ✅ **RESUELTO 2026-05-25** — SCPs corregidos: (1) `DenyNoEntornoEC2` acotado a `instance/*` y `volume/*` exclusivamente; (2) `DenyWrongEntorno` permite `["desarrollo","staging","produccion"]` con `Null:false`. Ver `policies/scp-p-lgafaevf-fix.json` y `policies/scp-p-k7ywnh7g-fix.json`. | — |
 | D4 | Dockerfiles funcionales en 7 repos | Carlos/Devs | ❓ Pendiente | C.2, E.3 |
 | D3 | .env.example con valores reales | Carlos/Devs | ❓ Pendiente | C.2, D.2 |
 | D5 | CIDR red on-premise UDABOL | Julio Chávez | ❓ Pendiente | C.2 SG Legacy |
@@ -444,79 +627,51 @@ RdsStubSubnetCidr: 10.20.22.0/28
 
 ---
 
-## Plan de trabajo — próxima sesión (bloqueantes N1–N4 resueltos)
+## Plan de trabajo — sesión 2026-05-25 (D.4 completado)
 
-**Fecha actualización:** 2026-05-24
-**Fuente de decisiones:** SOW-002 firmada (§2.2, §2.5, §2.6)
+**Fecha actualización:** 2026-05-25
+**Estado:** D.4 ✅ · ISS-003 ✅ · C.2-FIX ✅ · D.3 ✅ · Próximo: E.1 OTel Collector
 
-### Prioridad 1 — D.4 NAT Instance + VPC Endpoints + cierre ISS-003 (5h est.)
+### ~~Prioridad 0 — Cierre ISS-003~~ ✅ COMPLETADO 2026-05-25
 
-**Decisión arquitectónica:** ADR-FINOPS-001 aprobado — NAT Instance en lugar de NAT Gateway.
-Ahorro: ~$29/mes por cuenta = **$696/año** frente al NAT Gateway.
-Referencia completa: `SOW/adr/ADR-FINOPS-001-red-optimizada-dev-qa.md`
+3 DEV + 3 QA RUNNING en AppSubnetA. Ver sección C.2-FIX para detalle completo.
 
-**Templates a crear:**
-- `cloudformation/modules/vpc/nat-instance.yaml` — EC2 t4g.nano (fck-nat AMI), SG, route en private table
-- `cloudformation/modules/vpc/vpc-endpoints.yaml` — S3 Gateway (gratis) + 4 Interface Endpoints
+### ~~Prioridad 1 — D.2 MSK Serverless DEV+QA~~ ✅ COMPLETADO 2026-05-25
 
-**VPC Endpoints a desplegar:**
+### ~~Prioridad 1 — D.3 agt-readmodel ECS service~~ ✅ COMPLETADO 2026-05-25
 
-| Endpoint | Tipo | Costo/mes | Justificación |
-|---|---|---|---|
-| S3 | Gateway | $0 | ECR image layers — tráfico alto, costo cero |
-| ECR.api | Interface | $7.30 | ECS pull imágenes — resuelve ISS-003 |
-| ECR.dkr | Interface | $7.30 | ECS pull imágenes — resuelve ISS-003 |
-| logs (CloudWatch) | Interface | $7.30 | awslogs driver constante desde 6 tasks |
-| secretsmanager | Interface | $7.30 | ECS tasks leen creds RDS al arrancar |
-| lex.runtime | Interface | $7.30 | agt-agent: 1 llamada por mensaje WhatsApp |
+SOW §2.3 confirma que agt-readmodel es ECS Fargate (no Lambda). 
+Service creado con `ReadmodelDesiredCount=0` (sin imagen en ECR aún — dev team push imagen cuando código listo).
+Commits: `52186eb` (services.yaml + params), `43658d5` (ReadmodelDesiredCount fix).
+OBS-023: `IAMForECSRoles` inline policy aplicada a GHA roles DEV+QA via cloudadmin (iam:TagRole/UntagRole/PutRolePolicy/DeleteRolePolicy en agt-ecs-*).
 
-**Cambio en services.yaml:**
-- Subnet: `PrivateSubnetA` (era `PublicSubnetA`)
-- `AssignPublicIp: DISABLED` (era `ENABLED`)
-- Cierra **ISS-003** definitivamente
+### Prioridad 3 — E.1 OTel Collector ECS task (9h est.) 🔄 EN PROGRESO
 
-**Orden de deploy:**
-```
-1. vpc-endpoints.yaml DEV + QA
-2. nat-instance.yaml DEV + QA
-3. services.yaml DEV + QA (forzar redeploy)
-4. Validar E5: curl api.twilio.com → HTTP 401 (no timeout)
-```
+**Commit:** `1e47439` · **Estado:** template en main, deploy bloqueado por TECH-001
 
-**Valida Entregable E5 SOW-002 §2.2**
+**Entregado en `1e47439`:**
+- `cloudformation/modules/ecs/otel-collector.yaml` — ADOT (`public.ecr.aws/aws-observability/aws-otel-collector:latest`)
+  - IAM task role `agt-ecs-otel-task-{env}`: X-Ray + CloudWatch EMF
+  - Log group `/udabol/{env}/agt` (7 días retención)
+  - Config via `AOT_CONFIG_CONTENT`: `otlp:4317 → awsxray + awsemf`
+  - Cloud Map SD: `otel-collector.agt.local:4317`
+  - SG ingress rule port 4317 en shared ECS task SG (`EcsTaskSgOtelIngress`)
+  - Reutiliza `agt-ecs-exec-{env}` execution role del services stack
+- `parameters/{dev,qa}/otel-collector.json`: `OtelDesiredCount=1`
+- `scripts/deploy.sh`: case `otel-collector` → `udabol-otel-collector-{env}`
+- `deploy-nonprod.yml`: opción + condición `otel-collector` (pendiente merge — TECH-001)
 
-### Prioridad 2 — D.2 MSK Serverless (6h est.)
+**Próximo:** Resolver TECH-001 → trigger GHA `deploy-nonprod` con `stack=otel-collector, env=dev` → validar task RUNNING → repetir QA.
 
-Template `cloudformation/modules/msk/msk-serverless.yaml`
-- `AWS::MSK::ServerlessCluster` con VPC Connectivity IAM auth + TLS
-- 3 topics: `enrollment.events`, `payment.events`, `query.audit` — retención 7 días
-- SG dedicado: inbound 9098 (IAM+TLS) desde ECS tasks SG
-- VPC Endpoints para MSK en subnets privadas (§2.2)
-- Parámetros DEV + QA en `parameters/dev/msk.json` y `parameters/qa/msk.json`
-
-### Prioridad 3 — D.3 Lambda agt-readmodel (2h est.)
-
-- Event source mapping MSK → Lambda `agt-readmodel-{env}`
-- IAM: `kafka:DescribeClusterV2`, `kafka-cluster:Connect`, `kafka-cluster:DescribeGroup`, `kafka-cluster:ReadData`
-- Template `cloudformation/modules/lambda/readmodel.yaml`
-
-### Prioridad 4 — E.1 OTel Collector ECS task (9h est.)
-
-- `otelcol-contrib` como ECS task en namespace `agt.local:4317`
-- `config.yaml` con pipeline: receivers `otlp/grpc` → processors `batch` → exporters `awscloudwatchlogs + awsemf + awsxray`
-- Log groups `/udabol/{env}/agt` con retención 7 días
-- IAM task role con `xray:PutTelemetryRecords`, `xray:PutTraceSegments`, `logs:CreateLogGroup`, `logs:PutLogEvents`, `cloudwatch:PutMetricData`
-- Template `cloudformation/modules/ecs/otel-collector.yaml`
-
-### Prioridad 5 — E.2 OTel SDK en 7 repos agt-* (6h est.)
+### Prioridad 4 — E.2 OTel SDK Python en 7 repos agt-* (6h est.)
 
 - `opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-grpc`, `opentelemetry-instrumentation-fastapi` en `requirements.txt`
 - Bootstrap en `main.py`: `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector.agt.local:4317`
 - PR en cada repo → merge a `dev`
 
-### Sin bloqueante — ISS-002 (paralelo posible)
+### Paralelo posible — ISS-002
 
-Mejorar utterances `ConsultarNotas` + `Inscribir` en Lex (sin tilde, variantes coloquiales). No depende de N1–N4. Ver `agt-intent-parser/deploy/aws/intents/`.
+Mejorar utterances `ConsultarNotas` + `Inscribir` en Lex (sin tilde, variantes coloquiales). No depende de ningún bloque pendiente. Ver `agt-intent-parser/deploy/aws/intents/`.
 
 ---
 
@@ -524,9 +679,10 @@ Mejorar utterances `ConsultarNotas` + `Inscribir` en Lex (sin tilde, variantes c
 
 | ID | Componente | Descripción | Impacto | Prioridad |
 |----|------------|-------------|---------|-----------|
+| **TECH-001** | PAT GitHub sin scope `workflow` | El PAT `ghp_GrfWOW5...` no tiene scope `workflow` — no puede pushear cambios en `.github/workflows/**`. Workaround actual: separar commits (sin workflow) y pushear workflow manualmente desde GitHub UI. **Acción requerida:** Regenerar PAT con scope `workflow` o editar `.github/workflows/deploy-nonprod.yml` en GitHub UI para agregar `otel-collector` en `options` y en la condición `if` del job `deploy-stack`. | Bloquea actualización de workflows vía CLI | 🔴 Deuda técnica — bloquea despliegue GHA de E.1 hasta que el workflow sea actualizado |
 | **ISS-001** | `agt-whatsapp-gateway` handler | `ElegirMateria` + `ConsultarHorario` faltaban en `_INTENT_REPLIES` — devolvía respuesta genérica | Respuesta incorrecta al usuario | ✅ Corregido en código, commit `2cb6e38`, desplegado a Lambda DEV. QA: PR #1 dev→qa pendiente merge |
 | **ISS-002** | Lex bot `udabol-intent-parser-{env}` | "ver mis notas" clasifica como `ConsultarDeuda` en vez de `ConsultarNotas`; "inscribirme en calculo" (sin tilde) → `ConsultarDeuda` | Mala clasificación coloquial | 🔵 Corregir antes de E.2 smoke test — agregar utterances sin tilde a ambos intents |
-| **ISS-003** | ECS Fargate en App subnet (privada) | VPC Endpoints con `PrivateDnsEnabled: true` son VPC-wide. DNS resuelve `ecr.api.amazonaws.com` al IP privado del endpoint ENI. ECS task en subnet pública no tiene ruta a ese IP → timeout. **Causa raíz confirmada:** cliente debe estar en la misma subnet privada que los endpoints. | ECS tasks en subnet pública expuestas a internet | 🟡 Workaround activo. **Solución definitiva incluida en D.4** — mover ECS a PrivateSubnetA junto con los endpoints. Ver ADR-FINOPS-001. |
+| ~~**ISS-003**~~ | ECS Fargate en App subnet (privada) | NACL `NaclAppInboundFromPublic` (Rule 100) tenía `CidrBlock: VpcCidr`. S3 Gateway Endpoint retorna tráfico desde IPs públicas de S3 → NACL bloqueaba esos paquetes. ECR DKR redirige blobs de capas de imagen a presigned S3 URLs → timeout en image pull desde AppSubnetA. Fix: Rule 100 ampliada a `0.0.0.0/0`. Ver OBS-019–OBS-022 y sección C.2-FIX. | ECS tasks en subnet pública expuestas a internet | ✅ **RESUELTO 2026-05-25** — 3 DEV + 3 QA RUNNING en AppSubnetA (10.10.11.x / 10.20.11.x). Commits: f67922a (vpc.yaml NaclApp), 01db864 (endpoints a PublicSubnetA). |
 
 ---
 
@@ -568,4 +724,4 @@ Durante la planificación del bloque D.4 (NAT Gateway) se realizó un análisis 
 
 ---
 
-*Bitácora iniciada 2026-05-22 · Actualizada 2026-05-24 — FinOps ADR-FINOPS-001 incorporado*
+*Bitácora iniciada 2026-05-22 · Actualizada 2026-05-25 — E.1 en progreso · TECH-001 deuda técnica PAT workflow scope*
