@@ -48,6 +48,13 @@ Parameters:
     MaxValue: 4
     Description: "Desired task count per service (1 DEV, 2 QA)"
 
+  ReadmodelDesiredCount:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 4
+    Description: "Desired tasks for agt-readmodel (0 until image is pushed to ECR)"
+
   CpuUnits:
     Type: Number
     Default: 256
@@ -544,7 +551,7 @@ Resources:
         !ImportValue
           "Fn::Sub": "${ClusterStackName}-ClusterArn"
       TaskDefinition: !Ref TaskDefReadmodel
-      DesiredCount: !Ref DesiredCount
+      DesiredCount: !Ref ReadmodelDesiredCount
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:

@@ -12,4 +12,6 @@
   { "ParameterKey": "LogRetentionDays",      "ParameterValue": "14" }
 ,
   { "ParameterKey": "ImageAgtReadmodel",    "ParameterValue": "245650696072.dkr.ecr.us-east-1.amazonaws.com/agt-readmodel:dev-latest" }
+,
+  { "ParameterKey": "ReadmodelDesiredCount", "ParameterValue": "0" }
 ]
