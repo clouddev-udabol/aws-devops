@@ -31,7 +31,7 @@ on:
         description: 'Stack a desplegar'
         required: true
         type: choice
-        options: [vpc, budgets, nat-instance, vpc-endpoints, ecs-cluster, ecs-services, ecr, rds, whatsapp-gateway, all]
+        options: [vpc, budgets, nat-instance, vpc-endpoints, ecs-cluster, ecs-services, ecr, rds, whatsapp-gateway, msk, all]
         default: vpc
       enable_nat_gateway:
         description: 'Habilitar NAT Gateway (~$32/mes c/u)'
@@ -169,7 +169,8 @@ jobs:
         github.event.inputs.stack == 'ecs-services' ||
         github.event.inputs.stack == 'ecr' ||
         github.event.inputs.stack == 'rds' ||
-        github.event.inputs.stack == 'whatsapp-gateway'
+        github.event.inputs.stack == 'whatsapp-gateway' ||
+        github.event.inputs.stack == 'msk'
       )
     steps:
       - name: '[CD-INI-301] Checkout'

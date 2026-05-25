@@ -1,0 +1,7 @@
+[
+  { "ParameterKey": "Environment",       "ParameterValue": "qa"            },
+  { "ParameterKey": "Entorno",           "ParameterValue": "staging"       },
+  { "ParameterKey": "VpcStackName",      "ParameterValue": "iaapp-vpc-qa"  },
+  { "ParameterKey": "ClusterStackName",  "ParameterValue": "udabol-ecs-cluster-qa" },
+  { "ParameterKey": "MskStubSubnetCidr", "ParameterValue": "10.20.23.0/28" }
+]

@@ -14,7 +14,7 @@
 # Stacks soportados:
 #   vpc | budgets | nat-instance | vpc-endpoints
 #   ecs-cluster | ecs-services | ecr | rds
-#   whatsapp-gateway | ecs-services-update
+#   whatsapp-gateway | msk | ecs-services-update
 # ============================================================
 
 set -euo pipefail
@@ -64,6 +64,10 @@ case "${STACK}" in
   whatsapp-gateway)
     STACK_NAME="udabol-whatsapp-gateway-${ENV}"
     TEMPLATE_FILE="cloudformation/modules/lambda/whatsapp-gateway.yaml"
+    ;;
+  msk)
+    STACK_NAME="udabol-msk-${ENV}"
+    TEMPLATE_FILE="cloudformation/modules/msk/msk-serverless.yaml"
     ;;
   *)
     STACK_NAME="${PROJECT}-${STACK}-${ENV}"

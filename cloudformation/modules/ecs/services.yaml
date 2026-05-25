@@ -122,6 +122,28 @@ Resources:
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
                 Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:agt/*"
+        - PolicyName: MskKafkaAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kafka-cluster:Connect
+                  - kafka-cluster:AlterCluster
+                  - kafka-cluster:DescribeCluster
+                Resource: !Sub "arn:aws:kafka:${AWS::Region}:${AWS::AccountId}:cluster/udabol-${Environment}/*"
+              - Effect: Allow
+                Action:
+                  - kafka-cluster:DescribeTopic
+                  - kafka-cluster:CreateTopic
+                  - kafka-cluster:WriteData
+                  - kafka-cluster:ReadData
+                Resource: !Sub "arn:aws:kafka:${AWS::Region}:${AWS::AccountId}:topic/udabol-${Environment}/*/*"
+              - Effect: Allow
+                Action:
+                  - kafka-cluster:AlterGroup
+                  - kafka-cluster:DescribeGroup
+                Resource: !Sub "arn:aws:kafka:${AWS::Region}:${AWS::AccountId}:group/udabol-${Environment}/*/*"
       Tags:
         - Key: Entorno
           Value: !Ref Entorno

@@ -1,0 +1,110 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  MSK Serverless cluster para ERP-Agent UDABOL.
+  Autenticacion IAM (SASL/IAM, puerto 9098).
+  Stub subnet /28 en us-east-1b para satisfacer requisito multi-AZ de MSK Serverless.
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, qa, prod]
+  Entorno:
+    Type: String
+    AllowedValues: [desarrollo, staging, produccion]
+  VpcStackName:
+    Type: String
+    Description: Nombre del stack VPC del cual se importan subnets y VpcId
+  ClusterStackName:
+    Type: String
+    Description: Nombre del stack ECS cluster del cual se importa EcsTaskSgId
+  MskStubSubnetCidr:
+    Type: String
+    Description: CIDR /28 para subnet auxiliar en us-east-1b (satisface multi-AZ)
+
+Resources:
+
+  # Stub subnet en us-east-1b — satisface requisito multi-AZ de MSK Serverless
+  MskStubSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !ImportValue
+        Fn::Sub: '${VpcStackName}-VpcId'
+      CidrBlock: !Ref MskStubSubnetCidr
+      AvailabilityZone: !Sub '${AWS::Region}b'
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-stub-1b'
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: iaapp-udabol
+        - Key: ManagedBy
+          Value: cloudformation
+
+  MskSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub 'MSK Serverless ${Environment} - Kafka IAM 9098'
+      VpcId: !ImportValue
+        Fn::Sub: '${VpcStackName}-VpcId'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 9098
+          ToPort: 9098
+          SourceSecurityGroupId: !ImportValue
+            Fn::Sub: '${ClusterStackName}-EcsTaskSgId'
+          Description: ECS tasks => MSK IAM
+        - IpProtocol: tcp
+          FromPort: 9098
+          ToPort: 9098
+          CidrIp: !ImportValue
+            Fn::Sub: '${VpcStackName}-VpcCidr'
+          Description: Lambda readmodel => MSK IAM
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: '0.0.0.0/0'
+          Description: Allow all outbound
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-sg'
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: iaapp-udabol
+        - Key: ManagedBy
+          Value: cloudformation
+
+  MskServerlessCluster:
+    Type: AWS::MSK::ServerlessCluster
+    Properties:
+      ClusterName: !Sub 'udabol-${Environment}'
+      ClientAuthentication:
+        Sasl:
+          Iam:
+            Enabled: true
+      VpcConfigs:
+        - SubnetIds:
+            - !ImportValue
+              Fn::Sub: '${VpcStackName}-AppSubnetA'
+            - !Ref MskStubSubnet
+          SecurityGroups:
+            - !Ref MskSecurityGroup
+      Tags:
+        Entorno: !Ref Entorno
+        Proyecto: iaapp-udabol
+        ManagedBy: cloudformation
+
+Outputs:
+  ClusterArn:
+    Value: !Ref MskServerlessCluster
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterArn'
+  MskSecurityGroupId:
+    Value: !Ref MskSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-MskSgId'
+  MskStubSubnetId:
+    Value: !Ref MskStubSubnet
+    Export:
+      Name: !Sub '${AWS::StackName}-MskStubSubnetId'

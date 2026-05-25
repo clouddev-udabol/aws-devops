@@ -1,0 +1,7 @@
+[
+  { "ParameterKey": "Environment",       "ParameterValue": "dev"           },
+  { "ParameterKey": "Entorno",           "ParameterValue": "desarrollo"    },
+  { "ParameterKey": "VpcStackName",      "ParameterValue": "iaapp-vpc-dev" },
+  { "ParameterKey": "ClusterStackName",  "ParameterValue": "udabol-ecs-cluster-dev" },
+  { "ParameterKey": "MskStubSubnetCidr", "ParameterValue": "10.10.23.0/28" }
+]
