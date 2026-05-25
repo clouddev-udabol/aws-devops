@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: |
+  UDABOL ERP-Agent - NAT Instance (t4g.nano Graviton) para egress a internet en DEV/QA.
+  Reemplaza NAT Gateway administrado (~$32/mes) por EC2 (~$3.50/mes). ADR-FINOPS-001.
+  SourceDestCheck: false habilitado para forwarding de paquetes de terceros.
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues: [dev, qa, prod]
+
+  Entorno:
+    Type: String
+    AllowedValues: [desarrollo, staging, produccion]
+
+  VpcStackName:
+    Type: String
+    Description: "Nombre del stack VPC base (iaapp-vpc-dev / iaapp-vpc-qa)"
+
+  InstanceType:
+    Type: String
+    Default: t4g.nano
+    AllowedValues: [t4g.nano, t4g.micro, t4g.small]
+    Description: "t4g.nano ($3.50/mes) es suficiente para DEV/QA sin HA"
+
+Resources:
+
+  # ── AMI: Amazon Linux 2023 ARM64 via SSM (siempre la última) ─────────────────
+  # Resolución automática — no requiere actualizar el template al rotar AMIs
+
+  # ── Security Group ────────────────────────────────────────────────────────────
+  NatInstanceSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub "udabol-nat-instance-${Environment}"
+      GroupDescription: !Sub "NAT Instance ${Environment} - forward desde subnet privada"
+      VpcId:
+        !ImportValue
+          "Fn::Sub": "${VpcStackName}-VpcId"
+      SecurityGroupIngress:
+        - IpProtocol: "-1"
+          CidrIp:
+            !ImportValue
+              "Fn::Sub": "${VpcStackName}-VpcCidr"
+          Description: "Tráfico desde cualquier recurso de la VPC"
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: "0.0.0.0/0"
+          Description: "Egress irrestricto hacia internet"
+      Tags:
+        - Key: Name
+          Value: !Sub "udabol-nat-instance-${Environment}"
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+
+  # ── NAT Instance ──────────────────────────────────────────────────────────────
+  NatInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Sub "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64}}"
+      SubnetId:
+        !ImportValue
+          "Fn::Sub": "${VpcStackName}-PublicSubnetA"
+      SecurityGroupIds:
+        - !Ref NatInstanceSg
+      SourceDestCheck: false
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -xe
+          # Instalar iptables
+          dnf install -y iptables iptables-services
+          # Habilitar IP forwarding (persistente)
+          echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-nat.conf
+          sysctl -p /etc/sysctl.d/99-nat.conf
+          # Detectar interfaz de salida dinámicamente (eth0 o ens5 según kernel)
+          IFACE=$(ip route show default | awk '/default/ {print $5; exit}')
+          # Reglas NAT MASQUERADE
+          iptables -t nat -A POSTROUTING -o "$IFACE" -j MASQUERADE
+          iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+          iptables -A FORWARD -j ACCEPT
+          # Persistir reglas
+          service iptables save
+          systemctl enable iptables
+      Tags:
+        - Key: Name
+          Value: !Sub "udabol-nat-${Environment}"
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+
+  # ── Ruta 0.0.0.0/0 en la tabla privada (App) apuntando a la NAT Instance ─────
+  # Sin esta ruta, los ECS tasks en AppSubnetA no tienen egress a internet
+  NatRoutePrivateApp:
+    Type: AWS::EC2::Route
+    DependsOn: NatInstance
+    Properties:
+      RouteTableId:
+        !ImportValue
+          "Fn::Sub": "${VpcStackName}-RouteTablePrivateApp"
+      DestinationCidrBlock: "0.0.0.0/0"
+      InstanceId: !Ref NatInstance
+
+Outputs:
+  NatInstanceId:
+    Value: !Ref NatInstance
+    Export:
+      Name: !Sub "${AWS::StackName}-NatInstanceId"
+
+  NatInstancePrivateIp:
+    Value: !GetAtt NatInstance.PrivateIp
+    Export:
+      Name: !Sub "${AWS::StackName}-NatInstancePrivateIp"
+
+  NatInstanceSgId:
+    Value: !Ref NatInstanceSg
+    Export:
+      Name: !Sub "${AWS::StackName}-NatInstanceSgId"

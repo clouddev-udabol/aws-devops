@@ -201,6 +201,31 @@ Resource: !Sub "arn:aws:lex:${AWS::Region}:${AWS::AccountId}:bot-alias/${LexBotI
 
 ---
 
+## L-12 — VPC Endpoints con PrivateDnsEnabled=true son VPC-wide: incompatibles con tasks en subnet pública
+
+**Síntoma (iteración 1):** Tasks ECS Fargate con `AssignPublicIp: DISABLED` en subnet privada fallan con `ResourceInitializationError: dial tcp <IP_PUBLICA>:443: i/o timeout`.
+
+**Síntoma (iteración 2):** Tras crear VPC Endpoints (ecr.api, ecr.dkr, s3, logs, secretsmanager con `PrivateDnsEnabled: true`) y cambiar las tasks a subnet pública (`AssignPublicIp: ENABLED`), las tasks siguen fallando: `dial tcp 10.10.11.219:443: i/o timeout`.
+
+**Causa raíz (confirmada):** `PrivateDnsEnabled: true` en un Interface VPC Endpoint sobreescribe el DNS del servicio de forma **VPC-wide** mediante Route 53 Resolver. Todas las queries DNS a `api.ecr.us-east-1.amazonaws.com` en cualquier subnet del VPC retornan la IP privada del ENI del endpoint (e.g. `10.10.11.219`). Si el ENI del endpoint está en la subnet App (privada) pero la task está en la subnet pública, la conexión TCP falla porque las rutas y SGs no están configuradas para cross-subnet.
+
+**Solución para DEV/QA (subnet pública + internet):**
+1. Eliminar el stack de VPC Endpoints completamente
+2. Tasks con `AssignPublicIp: ENABLED` en subnet pública resuelven ECR a IPs públicas reales y conectan por internet
+3. Costo: $0 adicional. Funcional mientras no haya ALB ni DNS externo.
+
+**Solución correcta para PROD (subnet privada):**
+- Los Interface Endpoints deben crearse con `SubnetIds` apuntando a **la misma subnet** donde corren las tasks (o al menos a una subnet de la misma AZ)
+- Verificar que el Security Group del endpoint permite inbound TCP 443 desde el SG de las tasks ECS (no solo el CIDR del VPC)
+- Agregar `platformVersion: LATEST` en la TaskDefinition para asegurar soporte DNS moderno de Fargate
+- Orden de despliegue: crear endpoints → verificar DNS desde una instancia de prueba → luego lanzar tasks
+
+**Parámetros afectados:**
+- `SubnetId` en `parameters/dev/ecs-services.json`: usa `PublicSubnetA` (`subnet-00e7e9f0913426c64`)
+- `AssignPublicIp`: `ENABLED` en DEV/QA, `DISABLED` en PROD (con endpoints correctos)
+
+---
+
 ## Checklist para nuevos templates CFN
 
 Antes de deployar un nuevo template CFN, verificar:
