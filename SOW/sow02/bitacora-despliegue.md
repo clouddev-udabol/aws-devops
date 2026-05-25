@@ -24,7 +24,7 @@
 | **D.1** | RDS PostgreSQL 16 + Secrets Manager + rotación 30d | 2026-05-23 | 5.0 h | 4.5 h | ✅ COMPLETADO (DEV + QA) |
 | **D.2** | MSK Serverless DEV + QA + 3 topics (enrollment.events, payment.events, query.audit) | — | 6.0 h | — | ⬜ PENDIENTE (N1 resuelto por SOW-002 §2.5) |
 | **D.3** | Lambda agt-readmodel + event source mapping a MSK | — | 2.0 h | — | ⬜ PENDIENTE (depende D.2) |
-| **D.4** | NAT Instance t4g.nano + VPC Endpoints (ECR, Logs, SM, Lex) + mover ECS a PrivateSubnet — cierra ISS-003 | — | 5.0 h | — | ⬜ PENDIENTE — ver ADR-FINOPS-001 |
+| **D.4** | NAT Instance t4g.nano + VPC Endpoints (ECR, Logs, SM, Lex) + mover ECS a PrivateSubnet — cierra ISS-003 | 2026-05-25 | 5.0 h | 6.0 h | 🟡 PARCIAL — VPC Endpoints ✅ DEV live · NAT Instance ❌ bloqueado SCP (ver OBS-014) |
 | **E.1** | OTel Collector ECS task + config.yaml (backend CloudWatch + X-Ray) | — | 9.0 h | — | ⬜ PENDIENTE (N2 resuelto por SOW-002 §2.6) |
 | **E.2** | OTel SDK Python en 7 repos agt-* (requirements.txt + bootstrap main.py) | — | 6.0 h | — | ⬜ PENDIENTE (depende E.1) |
 | **E.3** | Smoke test end-to-end + documentación de evidencia | — | 4.0 h | — | ⏳ Bloqueado D6 (credenciales Twilio) |
@@ -436,6 +436,7 @@ RdsStubSubnetCidr: 10.20.22.0/28
 | ~~N3~~ | ~~VPC Single-AZ confirmada~~ | Franz | ✅ **RESUELTO** — SOW-002 §2.2 coloca NAT GW en us-east-1a únicamente → single-AZ confirmado para DEV/QA | C.0 ALB |
 | ~~N4~~ | ~~NAT Gateway en DEV/QA~~ | Franz | ✅ **RESUELTO** — SOW-002 §2.2 lo incluye expresamente en alcance (D.4) | D.4 |
 | A2 | Branch protection requiere **GitHub Team** ($4/usr/mes) o repos públicos — plan Free bloquea la API para repos privados (HTTP 403). Token `clouddev-udabol` con `admin:org`+`repo` verificado y funcional. Decisión pendiente de Franz/Dockweiler. | Franz | 🔴 Bloqueado — pendiente decisión de plan | A.2 / E1 |
+| **OBS-014** | SCP `p-lgafaevf` bloquea `ec2:RunInstances` en `security-group/*` via `aws:RequestTag/Entorno`. Los SGs son recursos pre-existentes — no admiten `RequestTag` en RunInstances. El SCP debe cambiar `aws:RequestTag` → `aws:ResourceTag` para el recurso `security-group/*`. **Franz debe corregir el SCP** antes de que se puedan crear EC2 instances en las cuentas DEV/QA. ECS Fargate NO afectado (usa `ecs:RunTask`, no `ec2:RunInstances`). | Franz | 🔴 Bloqueado — requiere corrección SCP | D.4 NAT Instance |
 | D4 | Dockerfiles funcionales en 7 repos | Carlos/Devs | ❓ Pendiente | C.2, E.3 |
 | D3 | .env.example con valores reales | Carlos/Devs | ❓ Pendiente | C.2, D.2 |
 | D5 | CIDR red on-premise UDABOL | Julio Chávez | ❓ Pendiente | C.2 SG Legacy |
