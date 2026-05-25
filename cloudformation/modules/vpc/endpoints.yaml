@@ -54,7 +54,7 @@ Resources:
       PrivateDnsEnabled: true
       SubnetIds:
         - !ImportValue
-            "Fn::Sub": "${VpcStackName}-AppSubnetA"
+            "Fn::Sub": "${VpcStackName}-PublicSubnetA"
       SecurityGroupIds:
         - !Ref EndpointSg
 
@@ -70,7 +70,7 @@ Resources:
       PrivateDnsEnabled: true
       SubnetIds:
         - !ImportValue
-            "Fn::Sub": "${VpcStackName}-AppSubnetA"
+            "Fn::Sub": "${VpcStackName}-PublicSubnetA"
       SecurityGroupIds:
         - !Ref EndpointSg
 
@@ -101,7 +101,7 @@ Resources:
       PrivateDnsEnabled: true
       SubnetIds:
         - !ImportValue
-            "Fn::Sub": "${VpcStackName}-AppSubnetA"
+            "Fn::Sub": "${VpcStackName}-PublicSubnetA"
       SecurityGroupIds:
         - !Ref EndpointSg
 
@@ -117,7 +117,7 @@ Resources:
       PrivateDnsEnabled: true
       SubnetIds:
         - !ImportValue
-            "Fn::Sub": "${VpcStackName}-AppSubnetA"
+            "Fn::Sub": "${VpcStackName}-PublicSubnetA"
       SecurityGroupIds:
         - !Ref EndpointSg
 
@@ -133,7 +133,7 @@ Resources:
       PrivateDnsEnabled: true
       SubnetIds:
         - !ImportValue
-            "Fn::Sub": "${VpcStackName}-AppSubnetA"
+            "Fn::Sub": "${VpcStackName}-PublicSubnetA"
       SecurityGroupIds:
         - !Ref EndpointSg
 
