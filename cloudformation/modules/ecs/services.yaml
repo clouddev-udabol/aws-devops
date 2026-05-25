@@ -37,6 +37,10 @@ Parameters:
     Type: String
     Description: "ECR image URI for agt-legacy-adapter"
 
+  ImageAgtReadmodel:
+    Type: String
+    Description: "ECR image URI for agt-readmodel"
+
   DesiredCount:
     Type: Number
     Default: 1
@@ -173,6 +177,15 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/agt/agt-legacy-adapter/${Environment}"
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+
+  LogGroupReadmodel:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/agt/agt-readmodel/${Environment}"
       RetentionInDays: !Ref LogRetentionDays
       Tags:
         - Key: Entorno
@@ -460,6 +473,104 @@ Resources:
         - Key: Servicio
           Value: agt-legacy-adapter
 
+  # -- agt-readmodel -----------------------------------------------------------
+  TaskDefReadmodel:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub "agt-readmodel-${Environment}"
+      NetworkMode: awsvpc
+      RequiresCompatibilities: [FARGATE]
+      Cpu: !Ref CpuUnits
+      Memory: !Ref MemoryMiB
+      ExecutionRoleArn: !GetAtt EcsExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: agt-readmodel
+          Image: !Ref ImageAgtReadmodel
+          PortMappings:
+            - ContainerPort: 8085
+              Protocol: tcp
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref Environment
+            - Name: LOG_LEVEL
+              Value: INFO
+            - Name: READMODEL_MODE
+              Value: mock
+            - Name: LEGACY_ADAPTER_URL
+              Value: "http://agt-legacy-adapter.agt.local:8080"
+          HealthCheck:
+            Command: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8085/v1/healthz')\" || exit 1"]
+            Interval: 30
+            Timeout: 5
+            Retries: 2
+            StartPeriod: 15
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroupReadmodel
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: agt-readmodel
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Servicio
+          Value: agt-readmodel
+
+  SdReadmodel:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: agt-readmodel
+      NamespaceId:
+        !ImportValue
+          "Fn::Sub": "${ClusterStackName}-NamespaceId"
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 10
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+
+  ServiceReadmodel:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: !Sub "agt-readmodel-${Environment}"
+      Cluster:
+        !ImportValue
+          "Fn::Sub": "${ClusterStackName}-ClusterArn"
+      TaskDefinition: !Ref TaskDefReadmodel
+      DesiredCount: !Ref DesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !ImportValue
+                "Fn::Sub": "${VpcStackName}-AppSubnetA"
+          SecurityGroups:
+            - !ImportValue
+                "Fn::Sub": "${ClusterStackName}-EcsTaskSgId"
+      ServiceRegistries:
+        - RegistryArn: !GetAtt SdReadmodel.Arn
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 0
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: false
+      Tags:
+        - Key: Entorno
+          Value: !Ref Entorno
+        - Key: Proyecto
+          Value: udabol-erp-agent
+        - Key: Servicio
+          Value: agt-readmodel
+
 Outputs:
   ServiceAgentArn:
     Value: !Ref ServiceAgent
@@ -490,3 +601,13 @@ Outputs:
     Value: "http://agt-legacy-adapter.agt.local:8080"
     Export:
       Name: !Sub "${AWS::StackName}-LegacyAdapterEndpoint"
+
+  ServiceReadmodelArn:
+    Value: !Ref ServiceReadmodel
+    Export:
+      Name: !Sub "${AWS::StackName}-ServiceReadmodelArn"
+
+  ReadmodelEndpoint:
+    Value: "http://agt-readmodel.agt.local:8085"
+    Export:
+      Name: !Sub "${AWS::StackName}-ReadmodelEndpoint"

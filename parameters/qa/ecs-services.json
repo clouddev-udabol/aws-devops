@@ -10,4 +10,6 @@
   { "ParameterKey": "CpuUnits",              "ParameterValue": "256" },
   { "ParameterKey": "MemoryMiB",             "ParameterValue": "512" },
   { "ParameterKey": "LogRetentionDays",      "ParameterValue": "30" }
+,
+  { "ParameterKey": "ImageAgtReadmodel",    "ParameterValue": "493735739951.dkr.ecr.us-east-1.amazonaws.com/agt-readmodel:qa-latest" }
 ]
