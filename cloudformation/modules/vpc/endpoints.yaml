@@ -35,6 +35,7 @@ Resources:
           CidrIp:
             !ImportValue
               "Fn::Sub": "${VpcStackName}-VpcCidr"
+          Description: "HTTPS desde cualquier recurso de la VPC hacia los Interface Endpoints"
       Tags:
         - Key: Entorno
           Value: !Ref Entorno

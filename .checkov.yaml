@@ -30,3 +30,13 @@ skip-check:
   - CKV_AWS_103   # TLS v1.2: N/A — no hay listener HTTPS en el ALB interno DEV/QA
   - CKV_AWS_91    # ALB access logging: FinOps — requiere bucket S3 dedicado; DEV/QA
                   # no tiene SLA que justifique el costo del almacenamiento de logs
+
+  # ── Lambda whatsapp-gateway ────────────────────────────────────────────────────
+  - CKV_AWS_117   # Lambda en VPC: función es webhook público de Twilio — requiere
+                  # egress a internet sin NAT; ponerla en VPC complicaría el routing
+  - CKV_AWS_115   # Lambda concurrency limit: DEV/QA — bajo tráfico, sin necesidad
+                  # de throttling explícito; costo innecesario de config
+  - CKV_AWS_116   # Lambda DLQ: DEV/QA — errores async visibles en CloudWatch Logs;
+                  # DLQ + SQS agrega $0.40/mes sin valor real en este entorno
+  - CKV_AWS_173   # Lambda env var KMS: secrets vienen de Secrets Manager en runtime
+                  # (no en env vars planas); KMS adicional es redundante
