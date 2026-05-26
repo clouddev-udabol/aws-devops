@@ -3,7 +3,7 @@
 **Proyecto:** UDABOL ERP-Agent
 **Sprint:** 1 — Fundación + Infraestructura base AWS
 **Autor:** Ayrton Irusta
-**Fecha:** 2026-05-23
+**Fecha:** 2026-05-23 (actualizado 2026-05-26 — L-13, L-14, L-15, L-16, L-17)
 
 ---
 
@@ -226,6 +226,148 @@ Resource: !Sub "arn:aws:lex:${AWS::Region}:${AWS::AccountId}:bot-alias/${LexBotI
 
 ---
 
+## L-13 — NACL subnet privada: regla de puertos efímeros debe abarcar `0.0.0.0/0`
+
+**Síntoma:** Tasks ECS Fargate en AppSubnetA (subnet privada) fallan con `CannotPullContainerError: dial tcp 52.216.51.58:443: i/o timeout` al intentar descargar capas de imagen desde ECR. El endpoint ECR DKR existe, tiene `PrivateDnsEnabled: true` y su ENI está accesible.
+
+**Causa raíz:** ECR DKR autentica y entrega manifests vía el Interface VPC Endpoint (IP privada). Pero los blobs de capas de imagen se sirven desde **S3 presigned URLs** — ECR redirige los GET de blobs a S3. El tráfico a S3 sale por el **S3 Gateway Endpoint** (ruta `pl-63a5400a`), que usa las IPs públicas de S3 como destino. El tráfico de **retorno de S3** llega con source IP = IP pública de S3 (`52.216.x.x`, `16.15.x.x`). Si la NACL de la subnet privada solo permite TCP 1024-65535 inbound desde el CIDR de la VPC, esos paquetes de retorno quedan bloqueados por el `deny all` por defecto.
+
+**Solución:** La regla NACL que permite puertos efímeros inbound debe usar `CidrBlock: "0.0.0.0/0"`, no el CIDR del VPC:
+
+```yaml
+NaclAppInboundFromPublic:
+  Type: AWS::EC2::NetworkAclEntry
+  Properties:
+    NetworkAclId: !Ref NaclApp
+    RuleNumber: 100
+    Protocol: 6
+    RuleAction: allow
+    Egress: false
+    CidrBlock: "0.0.0.0/0"   # ← no !Ref VpcCidr
+    PortRange: { From: 1024, To: 65535 }
+```
+
+**Seguridad:** Ampliar a `0.0.0.0/0` en una subnet privada (sin ruta a IGW) es seguro. Ningún host externo puede iniciar conexiones a esa subnet porque no existe una ruta de entrada desde internet. Solo tráfico de retorno de conexiones iniciadas dentro del VPC puede llegar con source IP externo (caso S3 Gateway Endpoint).
+
+**Regla:** En cualquier subnet privada que use S3 Gateway Endpoint o que el tráfico de retorno pueda venir de IPs externas a la VPC, la regla NACL de puertos efímeros inbound debe ser `0.0.0.0/0`.
+
+---
+
+## L-14 — ECS Deployment Circuit Breaker: deadlock con CloudFormation
+
+**Síntoma:** Stack CFN en `UPDATE_ROLLBACK_IN_PROGRESS` o `UPDATE_ROLLBACK_FAILED` permanente. Las tasks ECS fallan consecutivamente pero CFN no puede completar el rollback porque espera que el servicio ECS estabilice, y ECS no reintenta porque el circuit breaker está activo.
+
+**Causa:** El `DeploymentCircuitBreaker` de ECS se activa tras N fallos consecutivos y establece `RolloutState: FAILED`. ECS deja de lanzar nuevas tasks. CFN interpreta esto como "servicio inestable" y espera indefinidamente para completar el rollback, creando un deadlock.
+
+**Diagnóstico:**
+```bash
+aws ecs describe-services --cluster CLUSTER --services SERVICE \
+  --query "services[0].deployments[*].{Status:status,Desired:desiredCount,Running:runningCount,Rollout:rolloutState}"
+```
+Si `RolloutState: FAILED` → circuit breaker activo.
+
+**Secuencia de escape:**
+1. `aws ecs update-service --force-new-deployment --cluster CLUSTER --service SERVICE`
+   — resetea el circuit breaker, ECS lanza nuevas tasks
+2. Esperar `RolloutState: COMPLETED` (verificar con describe-services)
+3. Si el stack quedó en `UPDATE_ROLLBACK_FAILED`:
+   `aws cloudformation continue-update-rollback --stack-name STACK_NAME`
+4. Esperar `UPDATE_ROLLBACK_COMPLETE` antes de intentar el siguiente deploy
+
+**Contexto de cuentas:** `force-new-deployment` y `continue-update-rollback` son operaciones de recuperación — se ejecutan con `cloudadmin` como excepción. Notificar al usuario antes de proceder.
+
+**Prevención:** Asegurarse de que la causa raíz que activa el circuit breaker esté corregida antes de forzar un nuevo deploy. De lo contrario el ciclo se repite.
+
+---
+
+## L-15 — IAM inline policy en roles GHA pre-existentes: actualización fuera de CFN
+
+**Síntoma:** Stack `udabol-ecs-services-dev` falla con `AccessDeniedException: User ... is not authorized to perform: iam:DeleteRolePolicy on resource: role agt-ecs-task-dev`. El rol GHA `proy-app-gha-role-development` existe pero le faltan permisos para gestionar los roles IAM del stack ECS.
+
+**Causa:** El stack `github-oidc-iaapp-dev` que gestiona el inline policy `IAMForVPCFlowLogs` está en `ROLLBACK_COMPLETE`. CFN no permite actualizar un stack en ese estado. Los roles GHA (`proy-app-gha-role-development/qa`) fueron creados manualmente (no vía CFN), por lo que el template `iam-role.yaml` tiene el estado correcto pero el stack no puede aplicarlo.
+
+**Acciones necesarias para el ECS services deploy:**
+```
+iam:GetRole, iam:CreateRole, iam:DeleteRole
+iam:PutRolePolicy, iam:DeleteRolePolicy, iam:GetRolePolicy
+iam:TagRole, iam:UntagRole
+iam:ListRolePolicies, iam:ListAttachedRolePolicies
+iam:PassRole
+```
+Sobre recursos `arn:aws:iam::ACCOUNT:role/agt-ecs-*`.
+
+**Solución:** Aplicar directamente con `cloudadmin` (operación IAM/seguridad — excepción permitida):
+```bash
+aws iam put-role-policy \
+  --role-name proy-app-gha-role-development \
+  --policy-name IAMForVPCFlowLogs \
+  --policy-document file://policy.json \
+  --profile cloudadmin-dev
+```
+El template `iam-role.yaml` debe actualizarse igualmente para mantener IaC consistente, aunque el stack CFN no pueda aplicarlo.
+
+**Regla:** Cuando un stack CFN que gestiona IAM roles/policies está en `ROLLBACK_COMPLETE`, usar `aws iam put-role-policy` como workaround. Siempre actualizar el template IaC en paralelo. El stack en `ROLLBACK_COMPLETE` debe eliminarse y redesplegarse en una ventana de mantenimiento posterior.
+
+---
+
+## L-16 — CFN stack-level tags actualizan IAM roles: GHA role necesita iam:TagRole/UntagRole
+
+**Contexto:** Deploy de `ecs-services` fallaba con `iam:TagRole` / `iam:UntagRole` denegado aunque el template de IAM roles no cambió.
+
+**Causa raíz:** `aws cloudformation deploy` pasa tags de stack-level (`CommitHash`, `DeployDate`, etc.). En cada deploy, si algún tag cambia, CFN actualiza esos tags en TODOS los recursos del stack, incluyendo IAM roles. Para taggear un rol, el deployer necesita `iam:TagRole` y `iam:UntagRole`.
+
+**Síntoma confuso:** `EcsTaskRole` y `EcsExecutionRole` no cambiaron en el template, pero igual fallaron con AccessDenied en tagging porque `DeployDate` y `CommitHash` son diferentes en cada run.
+
+**Fix:** Inline policy `IAMForECSRoles` en GHA role con `iam:TagRole`, `iam:UntagRole`, `iam:PutRolePolicy`, `iam:DeleteRolePolicy` scoped a `agt-ecs-*`. Aplicar via `aws iam put-role-policy` (cloudadmin) ya que el stack del GHA role está en ROLLBACK_COMPLETE.
+
+**Regla:** Todo GHA role que despliege stacks CFN con `AWS::IAM::Role` debe tener `iam:TagRole` + `iam:UntagRole` scoped al prefijo de roles que gestiona. Si los stack-level tags son dinámicos (CommitHash, DeployDate), asumir que CFN intentará re-taggear los roles en cada deploy.
+
+---
+
+## L-17 — ADOT en ECS: AOT_CONFIG_CONTENT + puerto 4317 no incluido en SG del cluster
+
+**Contexto:** Deploy del OTel Collector (E.1) con `public.ecr.aws/aws-observability/aws-otel-collector`.
+
+**Lección 1 — AOT_CONFIG_CONTENT como env var elimina la necesidad de S3/SSM:**
+ADOT lee su configuración desde la variable de entorno `AOT_CONFIG_CONTENT` si está presente. Esto permite definir el config YAML completo inline en el `ContainerDefinitions` del task definition via `!Sub |`, con sustitución de `${Environment}` y `${AWS::Region}` desde CloudFormation. No requiere S3 bucket, SSM Parameter Store ni volumen EFS para montar el config.
+
+**Lección 2 — La extensión `health_check` es requerida para el ECS health check:**
+El binario `/healthcheck` incluido en la imagen ADOT conecta al endpoint de la extensión `health_check` (por defecto `0.0.0.0:13133`). Si la extensión no está declarada en el config, el binario no encuentra el endpoint y el health check ECS falla con exit 1. Siempre incluir en `AOT_CONFIG_CONTENT`:
+```yaml
+extensions:
+  health_check:
+    endpoint: "0.0.0.0:13133"
+service:
+  extensions: [health_check]
+```
+Y en el task definition:
+```yaml
+HealthCheck:
+  Command: ["CMD", "/healthcheck"]
+```
+
+**Lección 3 — El SG del cluster solo tiene self-referencing ingress en puerto 8080:**
+El stack `udabol-ecs-cluster-{env}` define `EcsTaskSgSelfIngress` únicamente para TCP 8080 (comunicación entre servicios). El puerto 4317 (gRPC OTLP) no está incluido. La solución correcta es agregar un recurso `AWS::EC2::SecurityGroupIngress` en el stack del OTel Collector que añade la regla al SG importado:
+```yaml
+EcsTaskSgOtelIngress:
+  Type: AWS::EC2::SecurityGroupIngress
+  Properties:
+    GroupId: !ImportValue "${ClusterStackName}-EcsTaskSgId"
+    IpProtocol: tcp
+    FromPort: 4317
+    ToPort: 4317
+    SourceSecurityGroupId: !ImportValue "${ClusterStackName}-EcsTaskSgId"
+```
+Al eliminar el stack otel-collector, la regla también se elimina.
+
+**Lección 4 — Reutilizar el execution role del services stack evita IAM duplicado:**
+El execution role `agt-ecs-exec-{env}` (creado en `udabol-ecs-services-{env}`) tiene `AmazonECSTaskExecutionRolePolicy` + `secretsmanager:GetSecretValue`. Referenciar por ARN con `!Sub "arn:aws:iam::${AWS::AccountId}:role/agt-ecs-exec-${Environment}"` evita crear un rol duplicado y no requiere ninguna operación IAM adicional en el GHA role.
+
+**Lección 5 — Los logs del contenedor ADOT satisfacen el criterio E6:**
+ADOT emite logs estructurados JSON a stdout (ej: `{"level":"info","msg":"Everything is ready...","service.name":"aws-otel-collector"}`). El driver `awslogs` los captura directamente al log group `/udabol/{env}/agt`. No es necesario configurar el exporter `awscloudwatchlogs` en el pipeline OTel para satisfacer "log group con al menos 1 entrada estructurada JSON" del criterio E6.
+
+---
+
 ## Checklist para nuevos templates CFN
 
 Antes de deployar un nuevo template CFN, verificar:
@@ -237,3 +379,9 @@ Antes de deployar un nuevo template CFN, verificar:
 - [ ] Los nombres de recursos IAM siguen los patrones `agt-*`, `udabol-*` o `role-vpc-flowlogs-*`
 - [ ] El `--profile` corresponde al entorno correcto (`proy-dev` / `proy-qa`)
 - [ ] Si es primera vez que se usa ECS en la cuenta: anticipar el error de service-linked role y reintentar
+- [ ] Subnets privadas con S3 Gateway Endpoint: regla NACL de puertos efímeros inbound debe usar `0.0.0.0/0` (ver L-13)
+- [ ] Antes de deployar ECS services: verificar que `proy-app-gha-role-*` tiene `IAMForECSRoles` con `iam:TagRole`, `iam:UntagRole`, `iam:PutRolePolicy`, `iam:DeleteRolePolicy` sobre `agt-ecs-*` (ver L-15, L-16)
+- [ ] Si el ECS Deployment Circuit Breaker se activa durante un deploy: seguir la secuencia de escape de L-14 antes de reintentar
+- [ ] Nuevos ECS services sin imagen en ECR: usar `DesiredCount=0` hasta que la imagen sea pusheada; evita circuit breaker
+- [ ] Templates con ADOT: incluir `health_check` extension en `AOT_CONFIG_CONTENT` y usar `CMD /healthcheck` (ver L-17)
+- [ ] Si el stack agrega un nuevo puerto inter-ECS: agregar `AWS::EC2::SecurityGroupIngress` en el mismo stack referenciando el SG exportado del cluster (ver L-17)
